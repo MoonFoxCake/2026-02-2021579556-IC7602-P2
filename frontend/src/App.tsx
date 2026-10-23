@@ -1,3 +1,6 @@
+import { Analytics } from '@vercel/analytics/react'
+import { SpeedInsights } from '@vercel/speed-insights/react'
+
 export default function App() {
   return (
     <div className="mx-auto flex min-h-svh max-w-6xl flex-col px-6 sm:px-10">
@@ -51,6 +54,9 @@ export default function App() {
         <p>Tecnológico de Costa Rica</p>
         <p>IC7602 · Segundo semestre 2026</p>
       </footer>
+
+      <Analytics />
+      <SpeedInsights />
     </div>
   )
 }

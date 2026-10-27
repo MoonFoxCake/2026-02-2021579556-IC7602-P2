@@ -10,7 +10,16 @@
 
 #define ZC_LOGIN_PATH  "/__zc/login"
 #define ZC_LOGOUT_PATH "/__zc/logout"
+#define ZC_CALLBACK_PATH "/__zc/callback"
 #define ZC_COOKIE_NAME "zc_session"
+#define ZC_CSRF_COOKIE "zc_csrf"
+
+/* Cómo se piden usuario/contraseña:
+ *  LOCAL: la caché sirve su propio formulario (/__zc/login) y verifica con POST al API Node.js.
+ *  UI:    la caché redirige al formulario del UI (React, Vercel). El UI autentica contra el API y
+ *         redirige de vuelta a /__zc/callback?ticket=...; la caché valida el ticket (HMAC-SHA256 con
+ *         ZC_TICKET_SECRET, compartido con el API Node.js), de un solo uso, y crea la sesión. */
+typedef enum { ZC_LOGIN_LOCAL, ZC_LOGIN_UI } zc_login_mode_t;
 
 typedef enum {
     ZC_AUTH_ALLOW,           /* continuar con caché/origen */
@@ -31,6 +40,10 @@ typedef struct {
     void        *verify_ud;
     const char  *verify_url;         /* ZC_VERIFY_URL (por defecto ZC_CONFIG_URL) */
     const char  *verify_token;       /* ZC_VERIFY_TOKEN (por defecto ZC_CONFIG_TOKEN) */
+    zc_login_mode_t login_mode;      /* ZC_LOGIN_MODE = local (default) | ui */
+    const char  *login_ui_url;       /* ZC_LOGIN_UI_URL, p.ej. https://ui.vercel.app/cache-login */
+    const char  *ticket_secret;      /* ZC_TICKET_SECRET (Secret de Kubernetes; >= 32 caracteres) */
+    long         ticket_max_age;     /* ZC_TICKET_MAX_AGE_SECS (120): vida máxima aceptada de un ticket */
 } zc_auth_opts_t;
 
 typedef struct zc_auth zc_auth_t;
@@ -50,6 +63,26 @@ int               zc_auth_login(zc_auth_t *a, const char *host, const char *patt
                                 char *token_out, size_t cap);
 int               zc_auth_logout(zc_auth_t *a, const char *cookie_header); /* 1 si había sesión */
 
+/* ---- Modo UI ----
+ * URL a la que se redirige al usuario: {login_ui_url}?domain=&pattern=&callback=&return_to=
+ * 0 ok; -1 falta configuración o no cabe. */
+int               zc_auth_ui_login_url(const zc_auth_t *a, const char *host, const char *pattern, int is_tls,
+                                       const char *return_to, char *out, size_t cap);
+/* Valida el ticket del callback y crea la sesión. expected_pattern = patrón de la regla de return_to.
+ * 0 ok (token_out); -1 inválido/expirado/otro dominio/otra regla; -4 ticket ya usado (replay). */
+int               zc_auth_redeem_ticket(zc_auth_t *a, const char *ticket, const char *host,
+                                        const char *expected_pattern, time_t now, char *token_out, size_t cap);
+/* Genera un ticket (lo usa el mock y las pruebas; en producción lo genera el API Node.js). */
+int               zc_ticket_make(const char *secret, const char *domain, const char *pattern, const char *user,
+                                 time_t exp, char *out, size_t cap);
+zc_login_mode_t   zc_auth_mode(const zc_auth_t *a);
+
+/* ---- CSRF del formulario local (double-submit cookie) ---- */
+int               zc_auth_csrf_new(char out[65]);
+void              zc_auth_csrf_cookie(const zc_auth_t *a, const char *tok, char *out, size_t cap);
+int               zc_auth_csrf_ok(const char *cookie_header, const char *form_value); /* 1 si coinciden */
+char             *zc_auth_login_form_csrf(const char *host, const char *return_to, const char *error, const char *csrf);
+
 /* Cabeceras Set-Cookie listas para enviar. */
 void              zc_auth_set_cookie(const zc_auth_t *a, const char *token, char *out, size_t cap);
 void              zc_auth_clear_cookie(const zc_auth_t *a, char *out, size_t cap);
@@ -59,5 +92,7 @@ char             *zc_auth_login_form(const char *host, const char *return_to, co
 void              zc_safe_return_path(const char *in, char *out, size_t cap); /* solo rutas locales: anti open-redirect */
 int               zc_form_get(const char *body, const char *key, char *out, size_t cap); /* x-www-form-urlencoded; 1 si existe */
 int               zc_cookie_get(const char *cookie_header, const char *name, char *out, size_t cap);
+int               zc_query_get(const char *path_with_query, const char *key, char *out, size_t cap); /* 1 si existe */
+void              zc_url_encode(const char *in, char *out, size_t cap);
 void              zc_sha256_hex(const void *data, size_t n, char out[65]);
 #endif

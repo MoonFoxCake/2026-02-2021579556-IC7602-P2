@@ -21,6 +21,7 @@ typedef struct {
     uint64_t accessed_seq;  /* LRU / MRU */
     uint64_t hits;          /* LFU */
     time_t   expires_at;    /* 0 = no expira */
+    uint32_t group;         /* grupo = regla/URL dueña de la entrada (0 = sin grupo). Ver zc_group_id */
 } zc_entry_t;
 
 typedef struct {
@@ -48,11 +49,21 @@ int    zc_index_lookup(zc_index_t *ix, const char *key, time_t now, zc_evict_cb 
 int    zc_index_put(zc_index_t *ix, const char *key, size_t size, long ttl, zc_policy_t policy,
                     time_t now, zc_evict_cb cb, void *ud);
 
+/* Igual que zc_index_put pero además respeta el tamaño de caché de la URL (cacheBytes):
+ * mientras el grupo no quepa en group_max se expulsan entradas DEL MISMO grupo; luego se aplica el
+ * límite del dominio sobre todas las entradas. group_max == 0 = sin límite por URL. */
+int    zc_index_put_ex(zc_index_t *ix, const char *key, size_t size, long ttl, zc_policy_t policy,
+                       uint32_t group, size_t group_max, time_t now, zc_evict_cb cb, void *ud);
+size_t zc_index_group_bytes(zc_index_t *ix, uint32_t group);
+uint32_t zc_group_id(const char *pattern); /* FNV-1a del patrón de la URL; estable entre refrescos; nunca 0 */
+
 int    zc_index_remove(zc_index_t *ix, const char *key); /* 1 si existía */
 void   zc_index_set_max(zc_index_t *ix, size_t max_bytes, zc_policy_t policy, zc_evict_cb cb, void *ud);
 size_t zc_index_bytes(zc_index_t *ix);
 size_t zc_index_count(zc_index_t *ix);
 
 int    zc_index_save(zc_index_t *ix, const char *path); /* atómico (tmp + rename) */
-int    zc_index_load(zc_index_t *ix, const char *path); /* 0 ok; -1 no existe/ilegible */
+int    zc_index_load(zc_index_t *ix, const char *path); /* 0 ok; -1 no existe/ilegible.
+                                                       * Si lo cargado excede max_bytes, llame zc_index_set_max
+                                                       * para expulsar CON callback (borrar archivos). */
 #endif

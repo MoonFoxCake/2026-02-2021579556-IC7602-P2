@@ -4,16 +4,21 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <strings.h>
 #include <pthread.h>
 #include <sys/random.h>
 #include <openssl/evp.h>
 #include <openssl/crypto.h>
+#include <openssl/hmac.h>
+#include "json_lite.h"
 #include <curl/curl.h>
 
 #define RL_SLOTS 256
 
 typedef struct { char hash[65]; char host[256]; char pattern[256]; time_t exp; } sess_t;
 typedef struct { char ip[64]; time_t start; int count; } rl_t;
+typedef struct { char hash[65]; time_t exp; } used_t;
+#define USED_MAX 4096
 
 struct zc_auth {
     zc_auth_opts_t o;
@@ -21,6 +26,8 @@ struct zc_auth {
     pthread_mutex_t mu;
     sess_t *s; size_t n, cap;
     rl_t rl[RL_SLOTS];
+    char *login_ui_url, *ticket_secret;
+    used_t *used; size_t n_used;
 };
 
 /* ---------- utilidades ---------- */
@@ -102,12 +109,17 @@ static void html_escape(const char *s, char *o, size_t cap) {
 }
 
 char *zc_auth_login_form(const char *host, const char *return_to, const char *error) {
-    char h[600], rt[1200], er[600], safe[1024];
+    return zc_auth_login_form_csrf(host, return_to, error, NULL);
+}
+
+char *zc_auth_login_form_csrf(const char *host, const char *return_to, const char *error, const char *csrf) {
+    char h[600], rt[1200], er[600], safe[1024], cs[200];
     zc_safe_return_path(return_to, safe, sizeof(safe));
     html_escape(host ? host : "", h, sizeof(h));
     html_escape(safe, rt, sizeof(rt));
     html_escape(error ? error : "", er, sizeof(er));
-    size_t cap = 4800; char *b = malloc(cap);
+    html_escape(csrf ? csrf : "", cs, sizeof(cs));
+    size_t cap = 5200; char *b = malloc(cap);
     if (!b) return NULL;
     snprintf(b, cap,
         "<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
@@ -117,8 +129,9 @@ char *zc_auth_login_form(const char *host, const char *return_to, const char *er
         "<form method=\"POST\" action=\"" ZC_LOGIN_PATH "\"><h2>Acceso a %s</h2>%s%s%s"
         "<input name=\"username\" placeholder=\"Usuario\" autocomplete=\"username\" required>"
         "<input name=\"password\" type=\"password\" placeholder=\"Contrase&ntilde;a\" autocomplete=\"current-password\" required>"
-        "<input type=\"hidden\" name=\"return_to\" value=\"%s\"><button type=\"submit\">Entrar</button></form></body></html>",
-        h, h, *er ? "<p class=\"e\">" : "", er, *er ? "</p>" : "", rt);
+        "<input type=\"hidden\" name=\"return_to\" value=\"%s\">%s%s%s<button type=\"submit\">Entrar</button></form></body></html>",
+        h, h, *er ? "<p class=\"e\">" : "", er, *er ? "</p>" : "", rt,
+        *cs ? "<input type=\"hidden\" name=\"csrf\" value=\"" : "", cs, *cs ? "\">" : "");
     return b;
 }
 
@@ -134,6 +147,11 @@ void zc_auth_opts_from_env(zc_auth_opts_t *o) {
     o->cookie_secure = (int)env_long("ZC_COOKIE_SECURE", 1);
     o->verify_url = getenv("ZC_VERIFY_URL") ? getenv("ZC_VERIFY_URL") : getenv("ZC_CONFIG_URL");
     o->verify_token = getenv("ZC_VERIFY_TOKEN") ? getenv("ZC_VERIFY_TOKEN") : getenv("ZC_CONFIG_TOKEN");
+    const char *m = getenv("ZC_LOGIN_MODE");
+    o->login_mode = (m && !strcasecmp(m, "ui")) ? ZC_LOGIN_UI : ZC_LOGIN_LOCAL;
+    o->login_ui_url = getenv("ZC_LOGIN_UI_URL");
+    o->ticket_secret = getenv("ZC_TICKET_SECRET");
+    o->ticket_max_age = env_long("ZC_TICKET_MAX_AGE_SECS", 120);
 }
 
 zc_auth_t *zc_auth_new(const zc_auth_opts_t *o) {
@@ -143,6 +161,10 @@ zc_auth_t *zc_auth_new(const zc_auth_opts_t *o) {
     a->verify_url = o->verify_url ? strdup(o->verify_url) : NULL;
     a->verify_token = o->verify_token ? strdup(o->verify_token) : NULL;
     a->o.verify_url = a->verify_url; a->o.verify_token = a->verify_token;
+    a->login_ui_url = o->login_ui_url ? strdup(o->login_ui_url) : NULL;
+    a->ticket_secret = o->ticket_secret ? strdup(o->ticket_secret) : NULL;
+    a->o.login_ui_url = a->login_ui_url; a->o.ticket_secret = a->ticket_secret;
+    if (a->o.ticket_max_age <= 0) a->o.ticket_max_age = 120;
     if (a->o.session_ttl <= 0) a->o.session_ttl = 3600;
     if (a->o.max_sessions == 0) a->o.max_sessions = 10000;
     if (a->o.login_max_attempts <= 0) a->o.login_max_attempts = 5;
@@ -153,6 +175,8 @@ zc_auth_t *zc_auth_new(const zc_auth_opts_t *o) {
 void zc_auth_free(zc_auth_t *a) {
     if (!a) return;
     free(a->s); free(a->verify_url); free(a->verify_token);
+    if (a->ticket_secret) { OPENSSL_cleanse(a->ticket_secret, strlen(a->ticket_secret)); free(a->ticket_secret); }
+    free(a->login_ui_url); free(a->used);
     pthread_mutex_destroy(&a->mu); free(a);
 }
 
@@ -314,4 +338,145 @@ void zc_auth_set_cookie(const zc_auth_t *a, const char *token, char *out, size_t
 void zc_auth_clear_cookie(const zc_auth_t *a, char *out, size_t cap) {
     snprintf(out, cap, "Set-Cookie: " ZC_COOKIE_NAME "=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0%s",
              a->o.cookie_secure ? "; Secure" : "");
+}
+
+/* ---------- utilidades de URL ---------- */
+void zc_url_encode(const char *in, char *out, size_t cap) {
+    static const char hx[] = "0123456789ABCDEF";
+    size_t o = 0;
+    for (; in && *in && o + 4 < cap; in++) {
+        unsigned char c = (unsigned char)*in;
+        if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') out[o++] = (char)c;
+        else { out[o++] = '%'; out[o++] = hx[c >> 4]; out[o++] = hx[c & 15]; }
+    }
+    if (cap) out[o < cap ? o : cap - 1] = '\0';
+}
+
+int zc_query_get(const char *path, const char *key, char *out, size_t cap) {
+    const char *q = path ? strchr(path, '?') : NULL;
+    if (!q) return 0;
+    char tmp[4096]; snprintf(tmp, sizeof(tmp), "%s", q + 1);
+    char *h = strchr(tmp, '#'); if (h) *h = '\0';
+    return zc_form_get(tmp, key, out, cap);
+}
+
+/* ---------- CSRF ---------- */
+int zc_auth_csrf_new(char out[65]) { return random_token(out, 65); }
+void zc_auth_csrf_cookie(const zc_auth_t *a, const char *tok, char *out, size_t cap) {
+    snprintf(out, cap, "Set-Cookie: " ZC_CSRF_COOKIE "=%s; Path=" ZC_LOGIN_PATH "; HttpOnly; SameSite=Strict; Max-Age=900%s",
+             tok, a->o.cookie_secure ? "; Secure" : "");
+}
+int zc_auth_csrf_ok(const char *cookie_header, const char *form_value) {
+    char c[128];
+    if (!form_value || strlen(form_value) != 64 || !zc_cookie_get(cookie_header, ZC_CSRF_COOKIE, c, sizeof(c)) || strlen(c) != 64)
+        return 0;
+    return CRYPTO_memcmp(c, form_value, 64) == 0;
+}
+
+/* ---------- modo UI: tickets ---------- */
+zc_login_mode_t zc_auth_mode(const zc_auth_t *a) { return a->o.login_mode; }
+
+int zc_auth_ui_login_url(const zc_auth_t *a, const char *host, const char *pattern, int is_tls,
+                         const char *return_to, char *out, size_t cap) {
+    if (!a->login_ui_url || !*a->login_ui_url) return -1;
+    char hn[256], safe[1024], cb[600], e_h[800], e_p[800], e_cb[1800], e_rt[3100];
+    host_norm(host, hn, sizeof(hn));
+    zc_safe_return_path(return_to, safe, sizeof(safe));
+    snprintf(cb, sizeof(cb), "%s://%s" ZC_CALLBACK_PATH, is_tls ? "https" : "http", host ? host : hn);
+    zc_url_encode(hn, e_h, sizeof(e_h)); zc_url_encode(pattern ? pattern : "", e_p, sizeof(e_p));
+    zc_url_encode(cb, e_cb, sizeof(e_cb)); zc_url_encode(safe, e_rt, sizeof(e_rt));
+    int n = snprintf(out, cap, "%s%cdomain=%s&pattern=%s&callback=%s&return_to=%s", a->login_ui_url,
+                     strchr(a->login_ui_url, '?') ? '&' : '?', e_h, e_p, e_cb, e_rt);
+    return (n > 0 && (size_t)n < cap) ? 0 : -1;
+}
+
+static void b64url_enc(const unsigned char *in, size_t n, char *out, size_t cap) {
+    static const char T[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    size_t o = 0;
+    for (size_t i = 0; i < n && o + 5 < cap; i += 3) {
+        unsigned v = (unsigned)in[i] << 16 | (i + 1 < n ? (unsigned)in[i + 1] << 8 : 0) | (i + 2 < n ? in[i + 2] : 0);
+        out[o++] = T[v >> 18 & 63]; out[o++] = T[v >> 12 & 63];
+        if (i + 1 < n) out[o++] = T[v >> 6 & 63];
+        if (i + 2 < n) out[o++] = T[v & 63];
+    }
+    out[o] = '\0';
+}
+static int b64v(int c) {
+    return c >= 'A' && c <= 'Z' ? c - 'A' : c >= 'a' && c <= 'z' ? c - 'a' + 26 : c >= '0' && c <= '9' ? c - '0' + 52
+         : c == '-' ? 62 : c == '_' ? 63 : -1;
+}
+static long b64url_dec(const char *in, size_t n, unsigned char *out, size_t cap) {
+    size_t o = 0; unsigned acc = 0; int bits = 0;
+    for (size_t i = 0; i < n; i++) {
+        int v = b64v((unsigned char)in[i]);
+        if (v < 0) return -1;
+        acc = acc << 6 | (unsigned)v; bits += 6;
+        if (bits >= 8) { bits -= 8; if (o >= cap) return -1; out[o++] = (unsigned char)(acc >> bits & 0xFF); }
+    }
+    return (long)o;
+}
+static void hmac_hex(const char *secret, const char *data, size_t n, char out[65]) {
+    unsigned char md[EVP_MAX_MD_SIZE]; unsigned len = 0;
+    HMAC(EVP_sha256(), secret, (int)strlen(secret), (const unsigned char *)data, n, md, &len);
+    for (unsigned i = 0; i < len && i < 32; i++) sprintf(out + 2 * i, "%02x", md[i]);
+    out[64] = '\0';
+}
+
+int zc_ticket_make(const char *secret, const char *domain, const char *pattern, const char *user,
+                   time_t exp, char *out, size_t cap) {
+    char nonce[65], ed[600], ep[600], eu[600], json[2200], b64[3000], mac[65];
+    if (!secret || random_token(nonce, sizeof(nonce)) != 0) return -1;
+    json_esc(domain, ed, sizeof(ed)); json_esc(pattern, ep, sizeof(ep)); json_esc(user, eu, sizeof(eu));
+    int n = snprintf(json, sizeof(json), "{\"domain\":\"%s\",\"pattern\":\"%s\",\"user\":\"%s\",\"exp\":%lld,\"nonce\":\"%s\"}",
+                     ed, ep, eu, (long long)exp, nonce);
+    b64url_enc((unsigned char *)json, (size_t)n, b64, sizeof(b64));
+    hmac_hex(secret, b64, strlen(b64), mac);
+    n = snprintf(out, cap, "%s.%s", b64, mac);
+    return (n > 0 && (size_t)n < cap) ? 0 : -1;
+}
+
+/* 1 si ya se había usado (replay); si no, lo registra hasta su expiración. */
+static int ticket_seen(zc_auth_t *a, const char *mac, time_t exp, time_t now) {
+    int seen = 0;
+    pthread_mutex_lock(&a->mu);
+    for (size_t i = 0; i < a->n_used; ) { if (a->used[i].exp < now) a->used[i] = a->used[--a->n_used]; else i++; }
+    for (size_t i = 0; i < a->n_used; i++) if (!strcmp(a->used[i].hash, mac)) { seen = 1; break; }
+    if (!seen) {
+        if (!a->used) a->used = calloc(USED_MAX, sizeof(used_t));
+        if (a->used) {
+            size_t slot = a->n_used < USED_MAX ? a->n_used++ : 0;  /* lleno: se pisa la primera */
+            snprintf(a->used[slot].hash, sizeof(a->used[slot].hash), "%s", mac);
+            a->used[slot].exp = exp;
+        }
+    }
+    pthread_mutex_unlock(&a->mu);
+    return seen;
+}
+
+int zc_auth_redeem_ticket(zc_auth_t *a, const char *ticket, const char *host, const char *expected_pattern,
+                          time_t now, char *token_out, size_t cap) {
+    if (!a->ticket_secret || strlen(a->ticket_secret) < 16 || !ticket || strlen(ticket) > 2900) return -1;
+    const char *dot = strrchr(ticket, '.');
+    if (!dot || strlen(dot + 1) != 64) return -1;
+    char mac[65]; hmac_hex(a->ticket_secret, ticket, (size_t)(dot - ticket), mac);
+    char given[65]; snprintf(given, sizeof(given), "%s", dot + 1);
+    for (char *p = given; *p; p++) *p = (char)tolower((unsigned char)*p);
+    if (CRYPTO_memcmp(mac, given, 64) != 0) return -1;
+
+    unsigned char json[2300];
+    long jn = b64url_dec(ticket, (size_t)(dot - ticket), json, sizeof(json) - 1);
+    if (jn <= 0) return -1;
+    json[jn] = '\0';
+    jval_t *j = jparse((const char *)json);
+    const char *dom = jstr(jget(j, "domain")), *pat = jstr(jget(j, "pattern")), *user = jstr(jget(j, "user"));
+    time_t exp = (time_t)jnum(jget(j, "exp"));
+    char hn[256]; host_norm(host, hn, sizeof(hn));
+    int ok = dom && pat && user && *user && exp > now && exp - now <= a->o.ticket_max_age
+             && !strcasecmp(dom, hn) && expected_pattern && !strcmp(pat, expected_pattern);
+    char pcopy[256]; snprintf(pcopy, sizeof(pcopy), "%s", pat ? pat : "");
+    jfree(j);
+    if (!ok) return -1;
+    if (ticket_seen(a, mac, exp, now)) return -4;
+    if (random_token(token_out, cap) != 0 || session_add(a, token_out, hn, pcopy, now) != 0) return -1;
+    return 0;
 }

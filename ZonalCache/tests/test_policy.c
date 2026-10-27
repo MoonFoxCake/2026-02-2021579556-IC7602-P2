@@ -87,6 +87,33 @@ int main(void) {
       CHECK(zc_index_load(&iy, "/tmp/no_existe_zc") == -1);
       unlink("/tmp/zc_idx_test"); zc_index_free(&ix); zc_index_free(&iy); }
 
+    /* Límite por URL (cacheBytes): solo compiten las entradas de la misma URL */
+    { zc_index_t ix; zc_index_init(&ix, 1000); nev = 0;
+      uint32_t gimg = zc_group_id("/img/*"), gapi = zc_group_id("/api/*");
+      CHECK(gimg != gapi && gimg != 0 && zc_group_id("/img/*") == gimg);
+      zc_index_put_ex(&ix, "i1", 100, 0, ZC_POLICY_FIFO, gimg, 250, 0, cb, NULL);
+      zc_index_put_ex(&ix, "a1", 100, 0, ZC_POLICY_FIFO, gapi, 0,   0, cb, NULL);   /* a1 es la más vieja de todas */
+      zc_index_put_ex(&ix, "i2", 100, 0, ZC_POLICY_FIFO, gimg, 250, 0, cb, NULL);
+      CHECK(zc_index_put_ex(&ix, "i3", 100, 0, ZC_POLICY_FIFO, gimg, 250, 0, cb, NULL) == 0);
+      CHECK(nev == 1 && strcmp(evicted[0], "i1") == 0);          /* FIFO dentro de /img/ (no a1) */
+      CHECK(zc_index_group_bytes(&ix, gimg) == 200 && zc_index_group_bytes(&ix, gapi) == 100);
+      CHECK(zc_index_put_ex(&ix, "big", 300, 0, ZC_POLICY_FIFO, gimg, 250, 0, cb, NULL) == -1); /* no cabe en la URL */
+      /* RANDOM con grupo: nunca toca otro grupo */
+      for (int i = 0; i < 20; i++) { char k[8]; snprintf(k, sizeof k, "r%d", i);
+          CHECK(zc_index_put_ex(&ix, k, 100, 0, ZC_POLICY_RANDOM, gimg, 250, 0, cb, NULL) == 0); }
+      CHECK(zc_index_group_bytes(&ix, gapi) == 100 && zc_index_group_bytes(&ix, gimg) <= 250);
+      /* persistencia conserva el grupo */
+      CHECK(zc_index_save(&ix, "/tmp/zc_idx_g") == 0);
+      zc_index_t iy; zc_index_init(&iy, 1000);
+      CHECK(zc_index_load(&iy, "/tmp/zc_idx_g") == 0 && zc_index_group_bytes(&iy, gapi) == 100);
+      unlink("/tmp/zc_idx_g"); zc_index_free(&ix); zc_index_free(&iy); }
+
+    /* Compatibilidad: un índice en formato ZCIDX1 (sin grupo) se sigue leyendo */
+    { FILE *f = fopen("/tmp/zc_idx_v1", "w"); fputs("ZCIDX1 5\nk1 10 1 2 3 0\n", f); fclose(f);
+      zc_index_t ix; zc_index_init(&ix, 100);
+      CHECK(zc_index_load(&ix, "/tmp/zc_idx_v1") == 0 && zc_index_count(&ix) == 1 && zc_index_bytes(&ix) == 10);
+      unlink("/tmp/zc_idx_v1"); zc_index_free(&ix); }
+
     { zc_policy_t p; CHECK(zc_policy_parse("lru", &p) == 0 && p == ZC_POLICY_LRU);
       CHECK(zc_policy_parse("Random", &p) == 0 && p == ZC_POLICY_RANDOM);
       CHECK(zc_policy_parse("ARC", &p) == -1 && zc_policy_parse(NULL, &p) == -1); }

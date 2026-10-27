@@ -4,12 +4,13 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
+#include <openssl/x509.h>
 
 int main(void) {
     printf("test_tls\n"); char err[200] = "";
     unsetenv("ZC_TLS_CERT_FILE");
     CHECK(zc_tls_ctx_from_env(err, sizeof err) == NULL);
-    if (system("scripts/gen-dev-cert.sh /tmp/zc_certs localhost >/dev/null") != 0) { CHECK(0); DONE(); }
+    if (system("bash scripts/gen-dev-cert.sh /tmp/zc_certs localhost >/dev/null") != 0) { CHECK(0); DONE(); }
     setenv("ZC_TLS_CERT_FILE", "/tmp/zc_certs/dev.crt", 1);
     setenv("ZC_TLS_KEY_FILE", "/tmp/zc_certs/dev.key", 1);
     SSL_CTX *ctx = zc_tls_ctx_from_env(err, sizeof err);
@@ -41,5 +42,40 @@ int main(void) {
     int st = 0; waitpid(pid, &st, 0);
     CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
     close(sv[0]); SSL_CTX_free(ctx);
+
+    /* --- SNI: certificado por dominio --- */
+    if (system("rm -rf /tmp/zc_sni && mkdir -p /tmp/zc_sni && cd /tmp/zc_sni && "
+               "for n in a.test wildcard.b.test; do cn=$n; [ $n = wildcard.b.test ] && cn='*.b.test'; "
+               "openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj \"/CN=$cn\" -keyout $n.key -out $n.crt 2>/dev/null; done") != 0) { CHECK(0); DONE(); }
+    setenv("ZC_TLS_KEY_FILE", "/tmp/zc_certs/dev.key", 1);
+    setenv("ZC_TLS_CERT_DIR", "/tmp/zc_sni", 1);
+    ctx = zc_tls_ctx_from_env(err, sizeof err);
+    CHECK(ctx != NULL);
+    const char *names[] = { "a.test", "x.b.test", "nadie.test", NULL };
+    const char *want[]  = { "a.test", "*.b.test", "localhost", "localhost" };
+    for (int i = 0; i < 4 && ctx; i++) {
+        CHECK(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+        pid = fork();
+        if (pid == 0) {
+            close(sv[0]);
+            SSL_CTX *cc = SSL_CTX_new(TLS_client_method());
+            SSL *c = SSL_new(cc); SSL_set_fd(c, sv[1]);
+            if (names[i]) SSL_set_tlsext_host_name(c, names[i]);
+            if (SSL_connect(c) != 1) _exit(2);
+            X509 *pc = SSL_get1_peer_certificate(c);
+            char cn[256] = "";
+            X509_NAME_get_text_by_NID(X509_get_subject_name(pc), NID_commonName, cn, sizeof cn);
+            SSL_write(c, "x", 1);
+            _exit(strcmp(cn, want[i]) == 0 ? 0 : 4);
+        }
+        close(sv[1]);
+        SSL *s2 = zc_tls_accept(ctx, sv[0]);
+        if (s2) { char b[4]; zc_tls_read(s2, b, 1); zc_tls_close(s2); }
+        st = 0; waitpid(pid, &st, 0);
+        CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+        close(sv[0]);
+    }
+    unsetenv("ZC_TLS_CERT_DIR");
+    zc_tls_sni_reset(); if (ctx) SSL_CTX_free(ctx);
     DONE();
 }

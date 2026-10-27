@@ -92,5 +92,50 @@ int main(void) {
     CHECK(form && !strstr(form, "<script>") && strstr(form, "&lt;script&gt;") && strstr(form, ZC_LOGIN_PATH));
     free(form);
     zc_auth_free(a);
+
+    /* --- modo UI: ticket firmado de un solo uso --- */
+    const char *SECRET = "secreto-compartido-de-pruebas-0123456789";
+    zc_auth_opts_t ou; memset(&ou, 0, sizeof ou);
+    ou.login_mode = ZC_LOGIN_UI; ou.login_ui_url = "https://ui.example/cache-login";
+    ou.ticket_secret = SECRET; ou.ticket_max_age = 120; ou.cookie_secure = 1;
+    zc_auth_t *u = zc_auth_new(&ou);
+    CHECK(zc_auth_mode(u) == ZC_LOGIN_UI);
+    char url[2048];
+    CHECK(zc_auth_ui_login_url(u, "x.com:8443", "/priv/*", 1, "/priv/a b.png?x=1", url, sizeof url) == 0);
+    CHECK(!strcmp(url, "https://ui.example/cache-login?domain=x.com&pattern=%2Fpriv%2F%2A&callback=https%3A%2F%2Fx.com%3A8443%2F__zc%2Fcallback&return_to=%2Fpriv%2Fa%20b.png%3Fx%3D1"));
+    CHECK(zc_auth_ui_login_url(u, "x.com", "/p", 0, "//evil.com", url, sizeof url) == 0 && strstr(url, "return_to=%2F") && !strstr(url, "evil"));
+
+    char tk[4096], st[80];
+    CHECK(zc_ticket_make(SECRET, "x.com", "/priv/*", "kevin", 5100, tk, sizeof tk) == 0);
+    CHECK(zc_auth_redeem_ticket(u, tk, "X.com:443", "/priv/*", 5000, st, sizeof st) == 0 && strlen(st) == 64);
+    snprintf(ck, sizeof ck, "zc_session=%s", st);
+    CHECK(zc_auth_check(u, &ru, "x.com", NULL, ck, 5001) == ZC_AUTH_ALLOW);
+    CHECK(zc_auth_redeem_ticket(u, tk, "x.com", "/priv/*", 5001, st, sizeof st) == -4);              /* replay */
+    CHECK(zc_ticket_make(SECRET, "x.com", "/priv/*", "kevin", 5100, tk, sizeof tk) == 0);
+    CHECK(zc_auth_redeem_ticket(u, tk, "otro.com", "/priv/*", 5000, st, sizeof st) == -1);           /* otro dominio */
+    CHECK(zc_auth_redeem_ticket(u, tk, "x.com", "/otra/*", 5000, st, sizeof st) == -1);              /* otra regla */
+    CHECK(zc_auth_redeem_ticket(u, tk, "x.com", "/priv/*", 5100, st, sizeof st) == -1);              /* expirado */
+    CHECK(zc_ticket_make(SECRET, "x.com", "/priv/*", "kevin", 9000, tk, sizeof tk) == 0);
+    CHECK(zc_auth_redeem_ticket(u, tk, "x.com", "/priv/*", 5000, st, sizeof st) == -1);              /* vida > max_age */
+    CHECK(zc_ticket_make("otro-secreto-de-al-menos-16", "x.com", "/priv/*", "kevin", 5100, tk, sizeof tk) == 0);
+    CHECK(zc_auth_redeem_ticket(u, tk, "x.com", "/priv/*", 5000, st, sizeof st) == -1);              /* firma mala */
+    CHECK(zc_ticket_make(SECRET, "x.com", "/priv/*", "kevin", 5100, tk, sizeof tk) == 0);
+    tk[3] = tk[3] == 'A' ? 'B' : 'A';                                                                 /* payload alterado */
+    CHECK(zc_auth_redeem_ticket(u, tk, "x.com", "/priv/*", 5000, st, sizeof st) == -1);
+    CHECK(zc_auth_redeem_ticket(u, "basura", "x.com", "/priv/*", 5000, st, sizeof st) == -1);
+    CHECK(zc_auth_redeem_ticket(u, NULL, "x.com", "/priv/*", 5000, st, sizeof st) == -1);
+    zc_auth_free(u);
+
+    /* --- CSRF y helpers --- */
+    char c1[65]; CHECK(zc_auth_csrf_new(c1) == 0 && strlen(c1) == 64);
+    snprintf(ck, sizeof ck, "zc_csrf=%s; zc_session=x", c1);
+    CHECK(zc_auth_csrf_ok(ck, c1) == 1);
+    CHECK(zc_auth_csrf_ok(ck, "0000000000000000000000000000000000000000000000000000000000000000") == 0);
+    CHECK(zc_auth_csrf_ok(NULL, c1) == 0 && zc_auth_csrf_ok(ck, NULL) == 0);
+    form = zc_auth_login_form_csrf("x.com", "/p", NULL, c1);
+    CHECK(form && strstr(form, "name=\"csrf\"") && strstr(form, c1)); free(form);
+    CHECK(zc_query_get("/__zc/callback?ticket=a.b&return_to=%2Fp", "return_to", out, sizeof out) && !strcmp(out, "/p"));
+    CHECK(!zc_query_get("/sin-query", "x", out, sizeof out));
+    zc_url_encode("a b/c?", out, sizeof out); CHECK(!strcmp(out, "a%20b%2Fc%3F"));
     DONE();
 }

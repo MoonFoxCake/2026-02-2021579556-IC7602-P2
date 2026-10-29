@@ -1,0 +1,17 @@
+# Dependencias
+node_modules/
+
+# Secretos: NUNCA subir a GitHub
+.env
+.env.*
+!.env.example
+*-firebase-adminsdk-*.json
+serviceAccountKey.json
+serviceAccount*.json
+
+# Vercel
+.vercel/
+
+# Sistema
+.DS_Store
+Thumbs.db

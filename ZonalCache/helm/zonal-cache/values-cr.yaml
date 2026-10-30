@@ -1,4 +1,0 @@
-zone: cr
-service:
-  httpNodePort: 30080
-  httpsNodePort: 30443

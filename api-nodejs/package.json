@@ -1,18 +1,21 @@
 {
   "name": "p2-redes-api",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "REST API en Node.js para el Proyecto 2 de Redes (IC7602): cuentas, dominios, URLs y configuracion de cachés zonales sobre Firestore.",
   "private": true,
-  "main": "src/firebase.js",
+  "main": "src/app.js",
   "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
     "env:from-json": "node scripts/json-to-env.js",
     "test:firestore": "node scripts/test-firestore.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
+    "express": "^4.21.2",
     "firebase-admin": "^12.7.0"
   }
 }

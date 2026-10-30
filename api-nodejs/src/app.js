@@ -1,13 +1,12 @@
 'use strict';
 
-const dgram = require('dgram');
-
 /**
  * Aplicacion Express del API.
  * Se exporta sin llamar a listen(): la usan tanto el servidor local (src/server.js)
  * como la funcion serverless de Vercel (api/index.js).
  */
 
+const dgram = require('dgram');
 const express = require('express');
 
 const app = express();

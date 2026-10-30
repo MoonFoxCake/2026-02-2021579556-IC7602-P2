@@ -1,0 +1,48 @@
+# Una release por zona:  helm install zc-cr helm/zonal-cache -f helm/zonal-cache/values-cr.yaml
+image:
+  repository: zonal-cache
+  tag: dev
+  pullPolicy: IfNotPresent
+
+zone: cr                       # ZC_ZONE: el API devuelve la config de esta zona
+
+config:
+  url: ""                      # ZC_CONFIG_URL: base del API Node.js en Vercel (https://<api>.vercel.app)
+  file: ""                     # ZC_CONFIG_FILE: alternativa local (pruebas); si se usa, se monta configFileContent
+  refreshSecs: 60
+  configFileContent: ""        # JSON de config cuando config.file != ""
+
+login:
+  mode: local                  # local | ui
+  uiUrl: ""                    # ZC_LOGIN_UI_URL, p.ej. https://<ui>.vercel.app/cache-login
+  sessionTtlSecs: 3600
+  maxAttempts: 5
+  windowSecs: 300
+  cookieSecure: "1"            # "0" solo para pruebas por HTTP plano
+
+# Secretos (NO van en values en claro): crear antes el Secret, p.ej.
+#   kubectl create secret generic zc-secrets --from-literal=ZC_CONFIG_TOKEN=... --from-literal=ZC_TICKET_SECRET=...
+existingSecret: zc-secrets
+
+tls:
+  enabled: false
+  secretName: zc-tls           # kubectl create secret tls zc-tls --cert=dev.crt --key=dev.key
+  sniSecretName: ""            # opcional: Secret con <dominio>.crt/.key (SNI); se monta en ZC_TLS_CERT_DIR
+
+# El DNS solo devuelve una IP (no un puerto): el cliente se conecta al 80/443 de esa IP.
+# Por eso cada zona necesita su propia IP con 80/443 => LoadBalancer (minikube tunnel / MetalLB).
+# NodePort sirve solo para probar con curl indicando el puerto.
+service:
+  type: LoadBalancer
+  httpPort: 80
+  httpsPort: 443
+  httpNodePort: null
+  httpsNodePort: null
+
+persistence:
+  enabled: true
+  size: 1Gi
+  storageClass: ""
+
+replicaCount: 1                # las sesiones viven en memoria del pod: 1 réplica por zona
+resources: {}

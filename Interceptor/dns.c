@@ -11,8 +11,9 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <curl/curl.h>
+#include <ctype.h>
 // Compilar: gcc dns.c -o dns -lcurl -lpthread -Wall OJO ESTO ES para linux, no me moleste en windows pq no uso windows y esto va a correr en docker asi que XD
-// Para el .env DNS_API_URL  base del API (default: http://localhost:8080)
+// Para el .env DNS_API_URL  base del API eso se da en el .env para mejor orden
 // se corre con sudo o sin sudo pero se especifica el puerto por como es el 53
 
 
@@ -30,6 +31,49 @@ typedef struct jval {
     size_t   count;
 } jval_t;
 //Parser del json, cualquier valor
+
+static void load_dotenv(const char *filename) {
+    FILE *f = fopen(filename, "r");
+    if (!f) return; // Si no hay .env, no hace nada (usa las vars del sistema)
+
+    char line[512];
+    while (fgets(line, sizeof(line), f)) {
+        // Ignorar comentarios y líneas vacías
+        char *p = line;
+        while (*p && isspace((unsigned char)*p)) p++;
+        if (*p == '#' || *p == '\0' || *p == '\n') continue;
+
+        // Buscar el '='
+        char *eq = strchr(p, '=');
+        if (!eq) continue;
+
+        *eq = '\0'; 
+        char *key = p;
+        char *val = eq + 1;
+
+        // Limpiar espacios y saltos de línea del valor
+        char *end = val + strlen(val) - 1;
+        while (end > val && isspace((unsigned char)*end)) *(end--) = '\0';
+
+        // Si el valor tiene comillas, se las saca
+        if (*val == '"') {
+            val++;
+            char *last_quote = strrchr(val, '"');
+            if (last_quote) *last_quote = '\0';
+        } else if (*val == '\'') {
+            val++;
+            char *last_quote = strrchr(val, '\'');
+            if (last_quote) *last_quote = '\0';
+        }
+
+        // el .env tiene prioridad, eso es el 1, si no se pone 0
+        setenv(key, val, 1); 
+    }
+    fclose(f);
+}
+
+
+
 
 static void jfree(jval_t *j) {
     if (!j) return;
@@ -827,9 +871,10 @@ static void *thread_main(void *arg) {
     return NULL;
 }
 
-/* ==================== Main ==================== */
+
 
 int main(int argc, char **argv) {
+    load_dotenv(".env");
     uint16_t port = 53;
 
     for (int i = 1; i < argc; i++) {

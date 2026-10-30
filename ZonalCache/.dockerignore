@@ -1,0 +1,6 @@
+certs/
+*.o
+*.a
+tools/zc_p3_demo
+tests/test_*
+!tests/test_*.c

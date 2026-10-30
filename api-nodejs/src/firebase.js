@@ -27,7 +27,8 @@ function readCredentials() {
     projectId: process.env.FIREBASE_PROJECT_ID,
     clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
     // En variables de entorno los saltos de linea llegan escapados como "\n".
-    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    // Se quitan comillas externas por si la variable se pego con ellas (ej. en Vercel).
+    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/^"|"$/g, '').replace(/\\n/g, '\n'),
   };
 }
 

@@ -10,8 +10,12 @@ de la Persona 2 los llame, sin tocar sus archivos (evita conflictos de merge).
 sudo apt-get install -y build-essential libcurl4-openssl-dev libssl-dev
 cd ZonalCache
 make          # genera libzc_p3.a
-make test     # 5 suites: políticas, config/reglas, auth/sesiones, TLS real, config en vivo
+make test     # 7 suites unitarias
+make e2e      # 29 pruebas con curl (demo + mock)
+make e2e-api  # 16 pruebas contra api-nodejs (ver docs/COMO-CORRER.md)
 ```
+
+> Guía completa de ejecución y estado de integración: [`COMO-CORRER.md`](COMO-CORRER.md).
 
 ## Archivos
 
@@ -41,8 +45,8 @@ make test     # 5 suites: políticas, config/reglas, auth/sesiones, TLS real, co
 
 ## Contrato con el API Node.js (Persona 4) — hay que acordarlo
 
-**1. `GET {ZC_CONFIG_URL}/api/cache/config?zone=<zona>`** con `Authorization: Bearer <token>` → `200` y JSON como
-`docs/ejemplo-config.json`. Campos: `domain` (admite `*.x.com`), `origin`, `maxCacheBytes`, y por URL:
+**1. `GET {ZC_CONFIG_URL}/api/cache/config?zone=<zona>`** con `Authorization: Bearer <token>` (el API acepta también `x-service-key`) → `200` y JSON como
+`docs/ejemplo-config.json`. Campos: `domain` (admite `*.x.com`), `origin` (del dominio y/o **por URL**; el de la URL gana), `maxCacheBytes`, y por URL:
 `pattern` (wildcards `*`), `auth.mode` (`none` | `apikey` | `userpass`), `auth.apiKeyHashes` (**SHA-256 hex** de cada
 key; en Firestore nunca guardar la key en claro), `cacheBytes`, `fileTypes[{ext, ttl, policy}]` (`ext:"*"` = cualquier otra).
 
@@ -100,14 +104,11 @@ scripts/gen-dev-cert.sh ./certs localhost && curl -k https://localhost:8443/
 | `x-api-key` | Funciona (comparación en tiempo constante) |
 | Usuario/contraseña + sesión + logout + rate limit | Funciona (verificador inyectable; el HTTP real depende del API de la Persona 4) |
 | SSL termination | Funciona (probado con handshake TLS real) |
-| Config desde API Node.js con refresco | Funciona con archivo local; contra el API real falta el endpoint de la Persona 4 |
+| Config desde API Node.js con refresco | Funciona contra `api-nodejs` (`src/cache-routes.js`) con Firestore simulado; falta probar con Firestore real |
 | Integración en el servidor HTTP | Pendiente (Persona 2) |
 
 ## Limitaciones conocidas
 
-- Límite por **dominio**; `cacheBytes` por URL se lee pero no se aplica.
 - Sesiones en memoria del pod: con varias réplicas hace falta afinidad de sesión o una sola réplica.
-- Un solo certificado (sin SNI por dominio).
 - Expulsión O(n) por entrada: suficiente para miles de objetos.
-- El formulario de login no tiene token CSRF.
 - Si una URL no define `fileTypes` que calcen con el recurso, no se cachea (se hace proxy).

@@ -5,7 +5,7 @@
 static const char *CFG =
  "{\"domains\":[{\"domain\":\"Ejemplo.com\",\"origin\":\"https://ejemplo.com\",\"maxCacheBytes\":1048576,\"urls\":["
  " {\"pattern\":\"/*\",\"auth\":{\"mode\":\"none\"},\"fileTypes\":[{\"ext\":\"html\",\"ttl\":60,\"policy\":\"LRU\"},{\"ext\":\"*\",\"ttl\":10,\"policy\":\"fifo\"}]},"
- " {\"pattern\":\"/api/*\",\"auth\":{\"mode\":\"apikey\",\"apiKeyHashes\":[\"2CF24DBA5FB0A30E26E83B2AC5B9E29E1B161E5C1FA7425E73043362938B9824\",\"corto\"]}},"
+ " {\"pattern\":\"/api/*\",\"origin\":\"http://rest-api-java:8080\",\"auth\":{\"mode\":\"apikey\",\"apiKeyHashes\":[\"2CF24DBA5FB0A30E26E83B2AC5B9E29E1B161E5C1FA7425E73043362938B9824\",\"corto\"]}},"
  " {\"pattern\":\"/privado/*\",\"cacheBytes\":5000,\"auth\":{\"mode\":\"userpass\"},\"fileTypes\":[{\"ext\":\"PNG\",\"ttl\":3600,\"policy\":\"LFU\"}]}]},"
  " {\"domain\":\"*.cdn.test\",\"origin\":\"http://o:8080\",\"maxCacheBytes\":10}]}";
 
@@ -36,6 +36,7 @@ int main(void) {
     CHECK(t && t->ttl == 10 && t->policy == ZC_POLICY_FIFO);
 
     const zc_rule_t *api = zc_domain_match_rule(d, "/api/x");
+    CHECK(api->origin && !strcmp(api->origin, "http://rest-api-java:8080") && pub->origin == NULL);   /* origin por URL opcional */
     CHECK(api->auth == ZC_AUTH_APIKEY && api->n_keys == 1 && zc_rule_filetype(api, "/api/x") == NULL); /* sin tipos => no cacheable */
     CHECK(strcmp(api->key_hashes[0], "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824") == 0); /* normalizado; hash corto descartado */
 

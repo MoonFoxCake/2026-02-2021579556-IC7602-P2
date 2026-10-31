@@ -47,7 +47,7 @@ int main(void) {
     /* público: proxy cacheable, MISS -> store -> HIT */
     r = R("GET", "/index.html?v=1"); zc_gate_handle(&r, now, &g);
     CHECK(g.action == ZC_GATE_PROXY && g.cacheable && !g.authenticated && g.ft && g.ft->ttl == 60);
-    CHECK(strlen(g.cache_key) == 64 && !strcmp(g.domain->origin, "http://origen:8080"));
+    CHECK(strlen(g.cache_key) == 64 && !strcmp(g.domain->origin, "http://origen:8080") && !strcmp(g.origin, "http://origen:8080")); /* sin origin en la URL => el del dominio */
     CHECK(!strcmp(g.domain_dir, "/tmp/zc_gate_cache/ejemplo.com"));
     CHECK(zc_gate_cache_lookup(&g, now) == 0 && zc_gate_cache_store(&g, 100, now) == 0);
     char key1[65]; strcpy(key1, g.cache_key); zc_gate_done(&g);

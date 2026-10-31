@@ -121,7 +121,7 @@ static void handle(conn_t *c) {
             /* >>> PERSONA 2 <<< aquí va el proxy real a g.domain->origin + target (HTTP/HTTPS con libcurl),
              * reenviando g.upstream_cookie y sin x-api-key. Simulado: */
             if (asprintf(&content, "Respuesta simulada del origen %s para %s (generada %ld)\n",
-                         g.domain->origin ? g.domain->origin : "?", target, (long)now) < 0) content = NULL;
+                         g.origin ? g.origin : "?", target, (long)now) < 0) content = NULL;
             clen2 = content ? strlen(content) : 0;
             if (g.cacheable) {
                 xc = "MISS";

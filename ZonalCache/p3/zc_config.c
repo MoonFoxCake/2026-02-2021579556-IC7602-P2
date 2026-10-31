@@ -35,7 +35,7 @@ void zc_config_free(zc_config_t *c) {
         free(d->domain); free(d->origin);
         for (size_t j = 0; j < d->n_rules; j++) {
             zc_rule_t *r = &d->rules[j];
-            free(r->pattern);
+            free(r->pattern); free(r->origin);
             for (size_t k = 0; k < r->n_keys; k++) free(r->key_hashes[k]);
             free(r->key_hashes); free(r->types);
         }
@@ -48,6 +48,7 @@ static int parse_rule(jval_t *u, zc_rule_t *r, char *err, size_t errlen) {
     const char *pat = jstr(jget(u, "pattern"));
     if (!pat || !*pat) { SETERR("regla sin 'pattern'"); return -1; }
     r->pattern = strdup(pat);
+    r->origin = xdup(jstr(jget(u, "origin")));
     r->cache_bytes = (size_t)jnum(jget(u, "cacheBytes"));
 
     jval_t *a = jget(u, "auth");

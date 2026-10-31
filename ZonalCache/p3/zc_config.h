@@ -11,6 +11,7 @@ typedef struct { char ext[16]; long ttl; zc_policy_t policy; } zc_filetype_t; /*
 
 typedef struct {
     char          *pattern;      /* ruta con wildcards, p.ej. /static/ seguido de asterisco */
+    char          *origin;       /* origen propio de esta URL (NULL = usar el del dominio) */
     zc_auth_mode_t auth;
     char         **key_hashes;   /* SHA-256 hex (minúsculas) de cada API key válida */
     size_t         n_keys;

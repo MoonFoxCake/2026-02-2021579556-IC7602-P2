@@ -214,6 +214,7 @@ void zc_gate_handle(const zc_req_t *rq, time_t now, zc_gate_res_t *rs) {
 
     const zc_rule_t *rule = zc_domain_match_rule(d, rq->target);
     rs->rule = rule;
+    rs->origin = (rule && rule->origin && *rule->origin) ? rule->origin : d->origin;
     switch (zc_auth_check(G.auth, rule, rq->host, rq->x_api_key, rq->cookie, now)) {
         case ZC_AUTH_DENY:
             respond_json(rs, 401, "{\"error\":\"x-api-key ausente o inv\\u00e1lida\"}");

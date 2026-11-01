@@ -1,15 +1,20 @@
 # Proyecto 2 (IC7602) — Estado del sistema y plan de integración
 
-Fecha de corte: domingo 25 de octubre de 2026 · Entrega: **martes 3 de noviembre** (antes de medianoche) ·
-Evaluación presencial: martes 10 de noviembre · Próximo reporte de avance: jueves 29 de octubre.
+Estado revisado: **31 de octubre de 2026** · Entrega indicada: **martes 3 de noviembre** (antes de medianoche) ·
+Evaluación presencial indicada: martes 10 de noviembre.
 
 Este documento resume **qué hay hoy en el repositorio**, **qué hace cada parte**, **qué contratos tienen que
 respetar entre sí** y **en qué orden pegar todo**. El diagrama editable está en
 [`docs/arquitectura.drawio`](arquitectura.drawio) (página 1: arquitectura; página 2: flujo dentro de la caché).
+El plan y las fechas de integración de §6 son la propuesta original; deben leerse como referencia, no como
+confirmación de que esos despliegues o pruebas ya se realizaron.
 
 ---
 
 ## 1. Arquitectura
+
+El diagrama y el flujo siguientes describen la arquitectura objetivo; no implican que todos los componentes
+estén integrados o desplegados actualmente. El estado implementado se detalla en §2 y §8.
 
 ```mermaid
 flowchart LR
@@ -57,11 +62,11 @@ flowchart LR
 | Carpeta | Dueña/o | Estado actual |
 |---|---|---|
 | `Interceptor/dns.c` | Persona 1 | **Es la versión del Proyecto 1, sin adaptar.** Atiende consultas A, consulta `DNS_API_URL/api/records/<nombre>?sourceIp=` y elige IP con estrategias single/multi/weight/geo/round-trip; si no, reenvía a `/api/dns_resolver`. **No** hay selección de caché zonal, ni Dockerfile, ni Helm. |
-| `ZonalCache/p3/` | Persona 3 | **Completo y probado** (ver §3). Biblioteca `libzc_p3.a`. |
+| `ZonalCache/p3/` | Persona 3 | Biblioteca de políticas, configuración, autenticación, TLS, registro y gate; tiene pruebas unitarias. La revisión del 31 de octubre confirmó 166 comprobaciones de políticas; la suite C completa no se pudo correr en ese entorno por falta de headers de libcurl. |
 | `ZonalCache/tools/zc_p3_demo.c` | Persona 3 | Servidor de **prueba** que ya usa toda la biblioteca, con origen simulado. Plantilla para la Persona 2. |
 | `ZonalCache/Dockerfile`, `ZonalCache/helm/zonal-cache/` | Persona 3 (P2 cambia el binario) | Escritos. **No validados** todavía con `docker build` / `helm lint` (ver §7). |
-| Servidor HTTP / proxy / caché en disco | Persona 2 | **No existe aún en el repo.** |
-| API Node.js | Persona 4 | **No existe aún en el repo.** Hay un mock que define el contrato: `ZonalCache/tests/mock-api.mjs`. |
+| Servidor HTTP / proxy / caché en disco | Persona 2 | El servidor demo existe, pero simula el origen; **falta el proxy real** a los orígenes de la configuración. |
+| API Node.js | Persona 4 | Existe `api-nodejs/src/cache-routes.js` con `GET /api/cache/config` y `POST /api/cache/verify-credentials`, montadas desde `src/app.js`. Sus cuatro pruebas pasan; el e2e del demo usa un almacén en memoria. Firestore real, despliegue de producción y selección por zona no están validados. El resto de rutas de administración que requeriría la UI también está pendiente. |
 | `frontend/` | Persona 5 | Proyecto React 19 + Vite 8 + Tailwind 4 + `vercel.json`. Solo una página de bienvenida: registro, dominios, URLs, usuarios, keys y login están **pendientes**. |
 | REST API Java, Apache | Persona 5 | **No existen aún en el repo.** |
 | `kubectl.exe` (raíz) | — | Binario de Windows de 63 MB versionado. **Recomiendo sacarlo del repo** (y del historial si se puede) y agregarlo al `.gitignore`. |
@@ -80,15 +85,18 @@ Detalle técnico completo en [`ZonalCache/docs/PERSONA3.md`](../ZonalCache/docs/
 | Tamaño de caché por URL (lo pide el UI) | `cacheBytes` de cada URL: primero compiten solo los objetos de esa URL. | unitarias + e2e |
 | Tipos de archivo, TTL y política por URL | `fileTypes[{ext, ttl, policy}]`, con `ext:"*"` como comodín. | unitarias + e2e |
 | Autenticación con `x-api-key` | SHA-256 de la key contra los hashes de Firestore, comparación en tiempo constante → 401. | unitarias + e2e |
-| Usuario/contraseña "realizando un llamado al UI" | **Dos modos**: `local` (la caché muestra el formulario y verifica con el API) y `ui` (la caché redirige al formulario del UI, que devuelve un ticket firmado HMAC de un solo uso). | unitarias + e2e |
+| Usuario/contraseña "realizando un llamado al UI" | La biblioteca/demo soporta `local` (formulario en la caché y verificación con el API) y el flujo `ui` con ticket firmado; este último se prueba contra el mock, no contra una UI/API real. | unitarias + e2e con mock |
 | Verificar la sesión en peticiones posteriores | Cookie `zc_session` HttpOnly/SameSite/Secure, ligada a dominio + URL, con expiración y logout (`/__zc/logout`). | unitarias + e2e |
 | SSL termination | OpenSSL, TLS ≥ 1.2, y **SNI** (un certificado por dominio). | handshake real |
 | Configuración desde Firebase | Descarga del API cada 60 s; si falla o viene inválida se conserva la última buena; snapshots seguros entre hilos. | unitarias + e2e |
 | Nada quemado en código | Todo por variables de entorno (tabla en `PERSONA3.md`). | — |
 | Extra de seguridad | CSRF en el formulario, rate limit de login (429), anti open-redirect, cookies de la caché no se reenvían al origen. | unitarias + e2e |
 
-Cómo comprobarlo: `cd ZonalCache && make test && make e2e` → **7 suites unitarias (341 verificaciones)** y
-**29 pruebas de punta a punta**, todas en verde; también pasan con AddressSanitizer/UBSan sin fugas.
+La documentación del módulo registra **7 suites unitarias (341 verificaciones)** y **29 pruebas e2e** para
+`make test` y `make e2e`. En la revisión del 31 de octubre se ejecutaron 166 comprobaciones de la suite de
+políticas y las 4 pruebas de `api-nodejs` (todas pasaron); no se completaron `make test` ni las e2e porque el
+entorno WSL no tenía los headers de libcurl y no permitió instalarlos. La prueba `make e2e-api` utiliza un
+almacén en memoria, no Firestore real.
 
 ---
 
@@ -96,11 +104,19 @@ Cómo comprobarlo: `cd ZonalCache && make test && make e2e` → **7 suites unita
 
 ### 4.1 Zonal Cache ⇄ API Node.js (Personas 2/3 ⇄ 4)
 
+El adaptador de caché ya está implementado en `api-nodejs/src/cache-routes.js` y montado bajo `/api/cache` en
+`api-nodejs/src/app.js`. Las pruebas de `api-nodejs` comprueban el adaptador; `api-nodejs/test/serve-memory.js`
+permite probarlo desde `make e2e-api` sin Firebase. Esto valida el contrato con datos simulados, no la
+configuración de Firestore en producción.
+
 | Endpoint | Quién lo llama | Respuesta |
 |---|---|---|
 | `GET /api/cache/config?zone=cr` + `Authorization: Bearer <ZC_CONFIG_TOKEN>` | cada caché, cada 60 s | `200` + JSON de config (formato abajo) |
 | `POST /api/cache/verify-credentials` + Bearer, cuerpo `{"domain","pattern","username","password"}` | caché (modo `local`) | `200` válidas · `401` inválidas |
 | Emisión de ticket (interno del API, lo pide el UI después del login) | UI (modo `ui`) | ticket `base64url(JSON).hexHMAC` |
+
+Aunque la caché envía `?zone=<zona>`, el endpoint actual no filtra por ese parámetro: devuelve la configuración
+de todos los dominios verificados. La selección/aislamiento de configuración por zona está pendiente.
 
 Formato de la config (ejemplo completo en `ZonalCache/docs/ejemplo-config.json`):
 
@@ -111,14 +127,17 @@ Formato de la config (ejemplo completo en `ZonalCache/docs/ejemplo-config.json`)
             { "pattern": "/api/*", "auth": { "mode": "apikey", "apiKeyHashes": ["<sha256 hex>"] } } ] } ] }
 ```
 
-Puntos que la Persona 4 debe cuidar:
+Puntos pendientes/contratos que debe cuidar el equipo:
 - Solo devolver **dominios verificados por TXT**.
 - `apiKeyHashes` = SHA-256 hex; **nunca** guardar la key en claro (el UI la muestra una sola vez al crearla).
 - Contraseñas con bcrypt/argon2.
 - El UI define tamaño por URL; si no hay un tamaño por dominio en el UI, el API puede mandar
   `maxCacheBytes` = suma de los `cacheBytes` de sus URLs.
-- `tests/mock-api.mjs` es la referencia ejecutable: si el API real responde lo mismo, la caché funciona.
-  La función `makeTicket` de ese archivo es compatible byte a byte con la verificación en C.
+- El router de caché implementa la conversión y verificación de credenciales; `api-nodejs/test/memory-store.js`
+  y `test/serve-memory.js` proporcionan datos y almacén de prueba. `ZonalCache/tests/mock-api.mjs` es otro mock,
+  usado por `make e2e`, y contiene el flujo de ticket que el API/UI real aún no implementa.
+- La caché envía `zone`, pero `buildCacheConfig` convierte actualmente todos los dominios verificados sin
+  filtrar por zona. Para despliegues CR/US hace falta acordar e implementar ese criterio.
 
 ### 4.2 UI ⇄ Zonal Cache (Persona 5 ⇄ 3), solo si usamos modo `ui`
 
@@ -185,9 +204,9 @@ Lo que falta adaptar en `dns.c`:
 |---|---|---|
 | 1 | `dns.c` adaptado (§4.4) + Dockerfile + chart; `nslookup -port=<p> ejemplo.com <ip>` devuelve la IP de la zona correcta | Con el mock (`node ZonalCache/tests/mock-api.mjs`) como API |
 | 2 | Servidor HTTP con `zc_gate` (partiendo de `tools/zc_p3_demo.c`) + proxy real + disco | `make e2e` debe seguir en verde cambiando el demo por su binario |
-| 4 | Endpoints de §4.1 desplegados en Vercel + modelo Firestore + seguridad del API | `ZC_CONFIG_URL=<vercel> ./tools/zc_p3_demo` y repetir las pruebas de §6 |
+| 4 | Completar el uso del modelo Firestore, configurar secretos/despliegue de producción y coordinar el filtrado por zona | Probar con Firestore real; el adaptador ya tiene pruebas y el e2e local usa almacén simulado |
 | 5 | UI (registro, dominios TXT, URLs con wildcards, tipos/TTL/política, usuarios, keys, `/cache-login`, logout) + REST Java + Apache con charts | Apache/Java: `curl` directo; UI: contra el API de la Persona 4 |
-| 3 (yo) | Ya listo; durante la integración: ajustar contratos, soporte a P2, ejecutar e2e en el clúster | `make test && make e2e` |
+| 3 (yo) | Biblioteca y demo implementados; apoyar la integración con el servidor real, ajustar contratos y validar e2e en el clúster | `make test && make e2e` |
 
 ---
 
@@ -226,20 +245,18 @@ curl -ik https://ejemplo.com/index.html                       # SSL termination
 3. **Sitio externo HTTPS**: el navegador mostrará advertencia porque el certificado de la caché no es del
    sitio real. Para la demostración usar `curl -k` o importar el certificado de desarrollo.
 4. **IP por zona**: ver la nota de §4.4 (LoadBalancer / `minikube tunnel`).
-5. **Docker y Helm de la caché no están validados**: el entorno donde se preparó no tenía acceso a Docker
-   Hub ni a Helm. Primer paso del lunes: `docker build -t zonal-cache:dev ZonalCache` y
+5. **Docker y Helm de la caché no están validados**: ejecutar `docker build -t zonal-cache:dev ZonalCache` y
    `helm lint ZonalCache/helm/zonal-cache --set config.url=http://x`.
 6. **Sesiones en memoria**: una réplica por zona (ya configurado en el chart).
 
 ---
 
-## 8. Borrador de la tabla "qué funciona / qué no" (requisito de la documentación)
+## 8. Estado resumido: qué funciona y qué falta
 
 | Componente | Funciona | No funciona / pendiente |
 |---|---|---|
-| DNS Interceptor | Atiende consultas A y reenvía las demás (código del P1) | Selección de caché zonal por país, Dockerfile y Helm |
-| Zonal Cache | Políticas, TTL, límites por dominio y por URL, x-api-key, usuario/contraseña (local y vía UI), sesiones, SSL/SNI, config con refresco, persistencia — probado con demo + mock | Servidor HTTP real con proxy al origen y disco (Persona 2); validar Docker/Helm |
-| RestAPI Node.js / UI | Proyecto base del UI configurado para Vercel | Endpoints, Firestore, seguridad del API, pantallas del UI |
-| Rest API / Apache | — | Ambos componentes y sus charts |
-
-Actualizar esta tabla el día de la entrega.
+| DNS Interceptor | Código del P1 atiende consultas A y reenvía las demás | Selección de caché zonal por país, Dockerfile y Helm |
+| Zonal Cache | Biblioteca P3 con políticas, TTL, límites, autenticación, sesiones, TLS/SNI y refresco de config; el demo permite probarla contra un origen simulado | Proxy al origen real integrado en el servidor P2; separar config por zona; validar Docker/Helm |
+| API Node.js | Router `/api/cache/*` para entregar configuración y verificar credenciales; 4 pruebas del adaptador pasan | Firestore real/despliegue de producción no validados; filtrado por `zone`; restantes rutas de administración que necesita la UI |
+| UI | Aplicación base configurada para Vercel | Pantallas de administración y `/cache-login`; el flujo UI/ticket solo está en el mock |
+| REST API / Apache | — | Ambos componentes y sus charts |

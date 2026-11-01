@@ -52,7 +52,8 @@ typedef struct {
     size_t      body_len;
 
     /* ---- PROXY: petición permitida ---- */
-    const zc_domain_t   *domain;  /* domain->origin = a dónde reenviar */
+    const zc_domain_t   *domain;
+    const char          *origin;  /* A DÓNDE REENVIAR: el origin de la URL si lo define, si no el del dominio */
     const zc_rule_t     *rule;    /* NULL = el dominio no tiene regla para esa ruta (se hace proxy sin cachear) */
     const zc_filetype_t *ft;      /* NULL = tipo no configurado => no cachear */
     int         cacheable;        /* GET/HEAD con ft != NULL */

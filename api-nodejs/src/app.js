@@ -124,6 +124,10 @@ app.post('/api/dns_resolver', (req, res) => {
 });
 
 
+// Endpoints de servicio para las cachés zonales (config y verificación de credenciales).
+const { createCacheRouter } = require('./cache-routes');
+app.use('/api/cache', createCacheRouter());
+
 app.use((req, res) => {
   res.status(404).json({ error: 'Ruta no encontrada' });
 });

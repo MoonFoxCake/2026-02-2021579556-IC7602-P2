@@ -808,8 +808,9 @@ static void handle_query(thread_ctx_t *ctx, CURL *curl) {
                     if (inet_pton(AF_INET, ip, &addr) == 1) {
                         printf("A: %s -> %s (ttl %u) tipo %s\n",
                                q.qname, ip, ttl, info.type ? info.type : "?");
+                        /* s_addr viene en orden de red; dns_build_response espera orden de host */
                         direct = dns_build_response(ctx->query, ctx->qlen,
-                                                    (uint32_t)addr.s_addr, ttl,
+                                                    ntohl(addr.s_addr), ttl,
                                                     0, &direct_len);
                     }
                     free(ip);

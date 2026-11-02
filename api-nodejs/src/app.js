@@ -89,6 +89,14 @@ app.post('/api/dns_resolver', (req, res) => {
 const { createAuthRouter } = require('./auth-routes');
 app.use('/api/auth', createAuthRouter());
 
+// Dominios de la persona usuaria y verificacion por TXT. Lo usa la UI.
+const { createDomainsRouter } = require('./domains-routes');
+app.use('/api/domains', createDomainsRouter());
+
+// URLs de cada dominio, sus API keys y sus usuarios. Lo usa la UI.
+const { createUrlsRouter } = require('./urls-routes');
+app.use('/api', createUrlsRouter());
+
 // Endpoints de servicio para las cachés zonales (config y verificación de credenciales).
 app.use('/api/cache', createCacheRouter({ store }));
 

@@ -1,6 +1,6 @@
 # Proyecto 2 (IC7602) — Estado del sistema y plan de integración
 
-Estado revisado: **31 de octubre de 2026** · Entrega indicada: **martes 3 de noviembre** (antes de medianoche) ·
+Estado revisado: **1 de noviembre de 2026** (integración de la Zonal Cache con el resto del sistema) · Entrega indicada: **martes 3 de noviembre** (antes de medianoche) ·
 Evaluación presencial indicada: martes 10 de noviembre.
 
 Este documento resume **qué hay hoy en el repositorio**, **qué hace cada parte**, **qué contratos tienen que
@@ -61,12 +61,12 @@ flowchart LR
 
 | Carpeta | Dueña/o | Estado actual |
 |---|---|---|
-| `Interceptor/dns.c` | Persona 1 | **Es la versión del Proyecto 1, sin adaptar.** Atiende consultas A, consulta `DNS_API_URL/api/records/<nombre>?sourceIp=` y elige IP con estrategias single/multi/weight/geo/round-trip; si no, reenvía a `/api/dns_resolver`. **No** hay selección de caché zonal, ni Dockerfile, ni Helm. |
-| `ZonalCache/p3/` | Persona 3 | Biblioteca de políticas, configuración, autenticación, TLS, registro y gate; tiene pruebas unitarias. La revisión del 31 de octubre confirmó 166 comprobaciones de políticas; la suite C completa no se pudo correr en ese entorno por falta de headers de libcurl. |
-| `ZonalCache/tools/zc_p3_demo.c` | Persona 3 | Servidor de **prueba** que ya usa toda la biblioteca, con origen simulado. Plantilla para la Persona 2. |
-| `ZonalCache/Dockerfile`, `ZonalCache/helm/zonal-cache/` | Persona 3 (P2 cambia el binario) | Escritos. **No validados** todavía con `docker build` / `helm lint` (ver §7). |
-| Servidor HTTP / proxy / caché en disco | Persona 2 | El servidor demo existe, pero simula el origen; **falta el proxy real** a los orígenes de la configuración. |
-| API Node.js | Persona 4 | Existe `api-nodejs/src/cache-routes.js` con `GET /api/cache/config` y `POST /api/cache/verify-credentials`, montadas desde `src/app.js`. Sus cuatro pruebas pasan; el e2e del demo usa un almacén en memoria. Firestore real, despliegue de producción y selección por zona no están validados. El resto de rutas de administración que requeriría la UI también está pendiente. |
+| `Interceptor/dns.c` | Persona 1 | Versión del P1. **Ya elige la caché zonal sin cambiar su lógica**: el API responde `/api/records/<dominio>` como record `geo` con las IPs de las cachés (ver §4.4). Se corrigió un error de orden de bytes que devolvía la IP al revés (`127.0.0.2` salía como `2.0.0.127`). Tiene `dockerfile`; **falta Helm**. El binario `Interceptor/dns` versionado es anterior a la corrección: recompilarlo o sacarlo del repo. |
+| `ZonalCache/p3/` | Persona 3 | Biblioteca de políticas, configuración, autenticación, TLS, registro y gate. 7 suites unitarias, 342 comprobaciones, todas en verde. |
+| `ZonalCache/src/zonal_cache.c` | Personas 2 y 3 | **Servidor real de la Zonal Cache**: HTTP/HTTPS (SSL termination), `zc_gate`, HIT desde disco, proxy al origen con libcurl (HTTP y HTTPS, GET/POST/PUT/PATCH/DELETE/HEAD), guarda objetos con su Content-Type, expulsa con la política configurada, apagado ordenado. Verificado también con AddressSanitizer. |
+| `ZonalCache/tools/zc_p3_demo.c` | Persona 3 | Servidor de prueba con origen simulado. Ya no va en la imagen; se conserva para `make e2e-demo`. |
+| `ZonalCache/Dockerfile`, `helm/zonal-cache/`, `scripts/deploy-k8s.sh` | Persona 3 | La imagen empaqueta el servidor real; se construyó y se probó con `docker run`. El chart se renderizó con varias combinaciones de valores (no se pudo correr `helm lint` en el entorno de preparación). `deploy-k8s.sh` hace imagen + Secrets + releases por zona. |
+| API Node.js | Persona 4 | `src/cache-routes.js` (config y credenciales, ahora con filtro opcional por `zones`) y **`src/dns-routes.js`** (`/api/records/:dominio` para el interceptor, reemplaza el `MOCK_DB`). 9 pruebas en verde. Firestore real y despliegue en Vercel no validados; faltan las rutas de administración de la UI. |
 | `frontend/` | Persona 5 | Proyecto React 19 + Vite 8 + Tailwind 4 + `vercel.json`. Solo una página de bienvenida: registro, dominios, URLs, usuarios, keys y login están **pendientes**. |
 | REST API Java, Apache | Persona 5 | **No existen aún en el repo.** |
 | `kubectl.exe` (raíz) | — | Binario de Windows de 63 MB versionado. **Recomiendo sacarlo del repo** (y del historial si se puede) y agregarlo al `.gitignore`. |
@@ -92,11 +92,10 @@ Detalle técnico completo en [`ZonalCache/docs/PERSONA3.md`](../ZonalCache/docs/
 | Nada quemado en código | Todo por variables de entorno (tabla en `PERSONA3.md`). | — |
 | Extra de seguridad | CSRF en el formulario, rate limit de login (429), anti open-redirect, cookies de la caché no se reenvían al origen. | unitarias + e2e |
 
-La documentación del módulo registra **7 suites unitarias (341 verificaciones)** y **29 pruebas e2e** para
-`make test` y `make e2e`. En la revisión del 31 de octubre se ejecutaron 166 comprobaciones de la suite de
-políticas y las 4 pruebas de `api-nodejs` (todas pasaron); no se completaron `make test` ni las e2e porque el
-entorno WSL no tenía los headers de libcurl y no permitió instalarlos. La prueba `make e2e-api` utiliza un
-almacén en memoria, no Firestore real.
+Estado de las pruebas al 1 de noviembre (todas en verde): `make test` 342 comprobaciones, `make e2e` 29,
+`make e2e-proxy` 49, `make e2e-api` 16, `make e2e-sistema` 11 y `npm test` del API 9. Las e2e usan orígenes reales
+locales (`tests/origin.mjs`) y un almacén en memoria en lugar de Firestore. Detalle y pasos manuales:
+[`ZonalCache/docs/COMO-CORRER.md`](../ZonalCache/docs/COMO-CORRER.md).
 
 ---
 
@@ -115,8 +114,9 @@ configuración de Firestore en producción.
 | `POST /api/cache/verify-credentials` + Bearer, cuerpo `{"domain","pattern","username","password"}` | caché (modo `local`) | `200` válidas · `401` inválidas |
 | Emisión de ticket (interno del API, lo pide el UI después del login) | UI (modo `ui`) | ticket `base64url(JSON).hexHMAC` |
 
-Aunque la caché envía `?zone=<zona>`, el endpoint actual no filtra por ese parámetro: devuelve la configuración
-de todos los dominios verificados. La selección/aislamiento de configuración por zona está pendiente.
+Zonas: **todas las cachés reciben todos los dominios verificados** (un cliente de CR y uno de US pueden pedir el
+mismo sitio; el DNS decide a qué caché va cada uno). Si un dominio trae el campo opcional `zones: ["us", ...]` en
+Firestore, solo lo reciben las cachés de esas zonas (y `/api/records` solo devuelve esas IPs).
 
 Formato de la config (ejemplo completo en `ZonalCache/docs/ejemplo-config.json`):
 
@@ -136,8 +136,7 @@ Puntos pendientes/contratos que debe cuidar el equipo:
 - El router de caché implementa la conversión y verificación de credenciales; `api-nodejs/test/memory-store.js`
   y `test/serve-memory.js` proporcionan datos y almacén de prueba. `ZonalCache/tests/mock-api.mjs` es otro mock,
   usado por `make e2e`, y contiene el flujo de ticket que el API/UI real aún no implementa.
-- La caché envía `zone`, pero `buildCacheConfig` convierte actualmente todos los dominios verificados sin
-  filtrar por zona. Para despliegues CR/US hace falta acordar e implementar ese criterio.
+- La caché envía `zone`; `buildCacheConfig` filtra solo los dominios que definen `zones` (ver arriba).
 
 ### 4.2 UI ⇄ Zonal Cache (Persona 5 ⇄ 3), solo si usamos modo `ui`
 
@@ -154,29 +153,38 @@ Puntos pendientes/contratos que debe cuidar el equipo:
 
 ### 4.3 Servidor HTTP ⇄ módulos P3 (Persona 2 ⇄ 3)
 
-La Persona 2 llama `zc_gate_handle()` una vez por petición y recibe o una respuesta lista (401/302/404/login)
-o `ZC_GATE_PROXY` con origen, clave de caché, TTL, política, índice del dominio y carpeta en disco.
-`tools/zc_p3_demo.c` es un servidor completo que ya lo hace; lo que falta está marcado `>>> PERSONA 2 <<<`:
+**Implementado en `ZonalCache/src/zonal_cache.c`.** El servidor llama `zc_gate_handle()` una vez por petición y
+recibe o una respuesta lista (401/302/404/login) o `ZC_GATE_PROXY` con origen, clave de caché, TTL, política,
+índice del dominio y carpeta en disco. Cumple lo acordado:
 
 - Proxy real a `domain->origin` con libcurl (HTTP **y HTTPS**), reenviando método, cuerpo y encabezados,
   **sin** `x-api-key` y con `Cookie: g.upstream_cookie`. El `Host` hacia el origen es el del origen.
 - Guardar el objeto en `<domain_dir>/<cache_key>` (escritura a tmp + rename) **junto con su Content-Type**
   (si se guarda en otro archivo, borrarlo también en el callback de expulsión).
 - Solo cachear respuestas `200` de GET (`g.cacheable`). Si `g.authenticated`, responder con `Cache-Control: private`.
-- HTTP/1.1 con `Content-Length` o `chunked`; keep-alive es opcional.
+- HTTP/1.1 con `Content-Length` (el cuerpo `chunked` del cliente se rechaza con 411); `Connection: close`.
 - Llamar `zc_gate_shutdown()` en SIGTERM (guarda índices).
 
 ### 4.4 DNS Interceptor ⇄ resto (Persona 1)
 
-Lo que falta adaptar en `dns.c`:
-1. **Lista de dominios registrados**: pedirla al API (puede reutilizar `GET /api/cache/config` con el mismo
-   Bearer, o un `GET /api/cache/domains` más liviano) y refrescarla periódicamente.
-2. **País del cliente** con la base IP-to-Country (local en la imagen o consultada al API, como en el P1).
-3. **País → zona → IP de la caché**, por variables de entorno, p.ej.
-   `ZONE_MAP="CR=cr,PA=cr,NI=cr,*=us"`, `ZC_ADDR_CR=10.x.x.x`, `ZC_ADDR_US=10.y.y.y`.
-4. Responder A con esa IP; los dominios no registrados se siguen reenviando al resolver (eso ya existe).
-5. Quitar el default `http://localhost:8080` de `DNS_API_URL` (el enunciado prohíbe valores quemados).
-6. Dockerfile + Helm (Service UDP 53).
+**Resuelto del lado del API, sin cambiar la lógica de `dns.c`:** el interceptor ya consultaba
+`GET {DNS_API_URL}/api/records/<dominio>?sourceIp=<ip>` y sabía elegir, en un record `geo`, el target cuyo
+`country` es igual a `client.countryCode`. `api-nodejs/src/dns-routes.js` responde exactamente eso:
+
+| Variable (Vercel) | Ejemplo | Uso |
+|---|---|---|
+| `ZONE_CACHES` | `cr=10.0.0.11,us=10.0.0.12` | Zona → EXTERNAL-IP del Service de su caché |
+| `COUNTRY_ZONES` | `CR=cr,PA=cr,NI=cr,*=us` | País → zona (`*` = por defecto) |
+| `IP_COUNTRY_RANGES` | `192.168.49.0/24=CR,10.0.0.0/8=US` | Tabla IP → país (CIDR) |
+
+Dominio no registrado o sin verificar → `404` → el interceptor reenvía al resolver (como antes). Lo comprueba
+`make e2e-sistema` con `dig` contra el `dns.c` real. En `dns.c` solo se corrigió el orden de bytes de la IP.
+
+Pendiente de la Persona 1:
+1. Helm (Service UDP 53) para el interceptor; ya existe `Interceptor/dockerfile`.
+2. Quitar el default `http://localhost:8080` de `DNS_API_URL` (el enunciado prohíbe valores quemados).
+3. Si se quiere la base IP-to-Country del P1 en lugar de `IP_COUNTRY_RANGES`, conectarla en `countryOf()` de
+   `dns-routes.js` (es una sola función).
 
 > **Ojo:** un registro A no lleva puerto. El cliente se conectará al **80/443** de la IP que devuelva el
 > interceptor, así que cada zona necesita **su propia IP con 80/443** (Service `LoadBalancer` con
@@ -202,11 +210,11 @@ Lo que falta adaptar en `dns.c`:
 
 | Persona | Entregable mínimo para integrar | Cómo se prueba sin los demás |
 |---|---|---|
-| 1 | `dns.c` adaptado (§4.4) + Dockerfile + chart; `nslookup -port=<p> ejemplo.com <ip>` devuelve la IP de la zona correcta | Con el mock (`node ZonalCache/tests/mock-api.mjs`) como API |
-| 2 | Servidor HTTP con `zc_gate` (partiendo de `tools/zc_p3_demo.c`) + proxy real + disco | `make e2e` debe seguir en verde cambiando el demo por su binario |
-| 4 | Completar el uso del modelo Firestore, configurar secretos/despliegue de producción y coordinar el filtrado por zona | Probar con Firestore real; el adaptador ya tiene pruebas y el e2e local usa almacén simulado |
+| 1 | Chart de Helm del interceptor (la selección de zona ya funciona vía `/api/records`, §4.4) | `make e2e-sistema` (corre `dns.c` real con `dig`) |
+| 2 | ~~Servidor HTTP con `zc_gate` + proxy real + disco~~ **Hecho** (`src/zonal_cache.c`) | `make check` |
+| 4 | Desplegar en Vercel con `SERVICE_KEY`, `ZONE_CACHES`, `COUNTRY_ZONES`, `IP_COUNTRY_RANGES`; probar con Firestore real | `npm test`; `make e2e-api` y `make e2e-sistema` usan almacén simulado |
 | 5 | UI (registro, dominios TXT, URLs con wildcards, tipos/TTL/política, usuarios, keys, `/cache-login`, logout) + REST Java + Apache con charts | Apache/Java: `curl` directo; UI: contra el API de la Persona 4 |
-| 3 (yo) | Biblioteca y demo implementados; apoyar la integración con el servidor real, ajustar contratos y validar e2e en el clúster | `make test && make e2e` |
+| 3 (yo) | Biblioteca + servidor real + imagen + chart + script de despliegue; falta validar en el clúster con el API en Vercel | `make check` |
 
 ---
 
@@ -238,15 +246,14 @@ curl -ik https://ejemplo.com/index.html                       # SSL termination
 
 ## 7. Riesgos y pendientes
 
-1. **Persona 2 es el camino crítico**: sin servidor real no hay Zonal Cache. Mitigación: el demo ya cubre
-   todo menos el proxy y el disco, así que se puede partir de él.
+1. ~~Persona 2 es el camino crítico~~: el servidor real ya existe y pasa todas las pruebas.
 2. **Validación TXT**: hace falta un dominio que el equipo controle (o un subdominio gratuito) para crear el
    registro TXT; los dominios de prueba tipo `ejemplo.com` no se pueden verificar.
 3. **Sitio externo HTTPS**: el navegador mostrará advertencia porque el certificado de la caché no es del
    sitio real. Para la demostración usar `curl -k` o importar el certificado de desarrollo.
 4. **IP por zona**: ver la nota de §4.4 (LoadBalancer / `minikube tunnel`).
-5. **Docker y Helm de la caché no están validados**: ejecutar `docker build -t zonal-cache:dev ZonalCache` y
-   `helm lint ZonalCache/helm/zonal-cache --set config.url=http://x`.
+5. **Docker y Helm de la caché**: la imagen se construyó y probó; falta un despliegue completo en minikube
+   (`bash ZonalCache/scripts/deploy-k8s.sh`) y `helm lint ZonalCache/helm/zonal-cache --set config.url=http://x`.
 6. **Sesiones en memoria**: una réplica por zona (ya configurado en el chart).
 
 ---
@@ -255,8 +262,8 @@ curl -ik https://ejemplo.com/index.html                       # SSL termination
 
 | Componente | Funciona | No funciona / pendiente |
 |---|---|---|
-| DNS Interceptor | Código del P1 atiende consultas A y reenvía las demás | Selección de caché zonal por país, Dockerfile y Helm |
-| Zonal Cache | Biblioteca P3 con políticas, TTL, límites, autenticación, sesiones, TLS/SNI y refresco de config; el demo permite probarla contra un origen simulado | Proxy al origen real integrado en el servidor P2; separar config por zona; validar Docker/Helm |
-| API Node.js | Router `/api/cache/*` para entregar configuración y verificar credenciales; 4 pruebas del adaptador pasan | Firestore real/despliegue de producción no validados; filtrado por `zone`; restantes rutas de administración que necesita la UI |
+| DNS Interceptor | Atiende consultas A; con `/api/records` del API devuelve la IP de la caché de la zona del cliente (probado con `dig`); reenvía los no registrados | Helm; default quemado de `DNS_API_URL` |
+| Zonal Cache | Servidor real: proxy HTTP/HTTPS a orígenes reales, caché en disco con LRU/LFU/FIFO/MRU/Random, TTL, límites por dominio y URL, `x-api-key`, usuario/contraseña con sesión y logout, SSL termination, config desde el API con refresco; imagen Docker; chart Helm por zona; script de despliegue | Despliegue completo en minikube y prueba con Firestore real |
+| API Node.js | `/api/cache/*` (config con filtro opcional por zona, credenciales) y `/api/records` (cachés por zona); 9 pruebas | Firestore real/despliegue en Vercel no validados; rutas de administración que necesita la UI |
 | UI | Aplicación base configurada para Vercel | Pantallas de administración y `/cache-login`; el flujo UI/ticket solo está en el mock |
 | REST API / Apache | — | Ambos componentes y sus charts |

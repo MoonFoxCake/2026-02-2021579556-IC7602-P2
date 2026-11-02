@@ -1,27 +1,32 @@
 #!/usr/bin/env bash
-# Prueba de punta a punta de la Persona 3 con curl: servidor demo + mock del API Node.js.
-# Uso: make e2e   (requiere node >= 18, curl, openssl)
+# Prueba de punta a punta con curl: Zonal Cache + mock del API Node.js (config, credenciales, login del UI)
+# + un origen HTTP real (tests/origin.mjs).
+# Uso: make e2e        -> servidor real (./zonal-cache)
+#      make e2e-demo   -> servidor de prueba de la Persona 3 (ZC_BIN=./tools/zc_p3_demo)
+# Requiere node >= 18, curl, openssl.
 set -uo pipefail
 unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy; export NO_PROXY="*" no_proxy="*"   # curl directo, sin proxies del sistema
 cd "$(dirname "$0")/.."
 W=$(mktemp -d /tmp/zc_e2e.XXXX)
-HP=18080; SP=18443; MP=19900
+BIN=${ZC_BIN:-./zonal-cache}
+HP=18080; SP=18443; MP=19900; OP=19810
 TOKEN=token-de-la-cache; SECRET=secreto-compartido-de-pruebas-0123456789
 CT="--connect-to ejemplo.com:$HP:127.0.0.1:$HP --connect-to ejemplo.com:$SP:127.0.0.1:$SP"
-OK=0; FAIL=0; DEMO=; MOCK=
+OK=0; FAIL=0; DEMO=; MOCK=; ORIG=
 check() { if (set +o pipefail; eval "$2"); then OK=$((OK+1)); echo "  ok   $1"; else FAIL=$((FAIL+1)); echo "  FALLO $1"; fi; }
-cleanup() { [ -n "$DEMO" ] && kill "$DEMO" 2>/dev/null; [ -n "$MOCK" ] && kill "$MOCK" 2>/dev/null; wait 2>/dev/null; rm -rf "$W"; }
+cleanup() { for p in $DEMO $MOCK $ORIG; do kill "$p" 2>/dev/null; done; wait 2>/dev/null; rm -rf "$W"; }
 trap cleanup EXIT
 wait_port() { for _ in $(seq 50); do curl -s -o /dev/null "http://127.0.0.1:$1/" && return 0; sleep 0.1; done; return 1; }
 
-MOCK_PORT=$MP MOCK_TOKEN=$TOKEN MOCK_TICKET_SECRET=$SECRET node tests/mock-api.mjs >"$W/mock.log" 2>&1 & MOCK=$!
+ORIGIN_PORT=$OP ORIGIN_NAME=web node tests/origin.mjs >"$W/origin.log" 2>&1 & ORIG=$!
+MOCK_ORIGIN=http://127.0.0.1:$OP MOCK_PORT=$MP MOCK_TOKEN=$TOKEN MOCK_TICKET_SECRET=$SECRET node tests/mock-api.mjs >"$W/mock.log" 2>&1 & MOCK=$!
 bash scripts/gen-dev-cert.sh "$W/certs" ejemplo.com >/dev/null
 start_demo() { # $1 = local|ui
   ZC_CONFIG_URL=http://127.0.0.1:$MP ZC_CONFIG_TOKEN=$TOKEN ZC_ZONE=cr ZC_CACHE_DIR="$W/cache" \
   ZC_HTTP_PORT=$HP ZC_HTTPS_PORT=$SP ZC_TLS_CERT_FILE="$W/certs/dev.crt" ZC_TLS_KEY_FILE="$W/certs/dev.key" \
   ZC_COOKIE_SECURE=0 ZC_LOGIN_MODE=$1 ZC_LOGIN_UI_URL=http://127.0.0.1:$MP/cache-login ZC_TICKET_SECRET=$SECRET \
-  ./tools/zc_p3_demo >>"$W/demo.log" 2>&1 & DEMO=$!
-  wait_port $HP || { echo "el demo no arrancó"; cat "$W/demo.log"; exit 1; }
+  "$BIN" >>"$W/demo.log" 2>&1 & DEMO=$!
+  wait_port $HP || { echo "la caché no arrancó"; cat "$W/demo.log"; exit 1; }
 }
 stop_demo() { kill -TERM "$DEMO"; wait "$DEMO" 2>/dev/null; DEMO=; }
 wait_port $MP || { echo "mock no arrancó"; cat "$W/mock.log"; exit 1; }
@@ -72,10 +77,13 @@ echo "== Límite por URL (cacheBytes=600) con LFU"
 for f in c d e f g h i j; do curl -s -o /dev/null $CT -b "$W/jar2" $B/privado/$f.txt; done
 BYTES=$(curl -s -D - -o /dev/null $CT -b "$W/jar2" $B/privado/j.txt | sed -n 's/^X-ZC-Domain-Bytes: //p' | tr -d '\r')
 check "dominio no supera maxCacheBytes"      '[ "$BYTES" -le 2000 ]'
+# Los archivos en disco deben corresponder al índice: el total de bytes de cuerpos no puede pasar de maxCacheBytes
+# (cada archivo del servidor real lleva además un encabezado "ZC1\n<content-type>\n" de < 64 B).
 NOBJ=$(ls "$W/cache/ejemplo.com" | grep -vc index.zc)
-check "archivos expulsados se borran"        '[ "$NOBJ" -le 10 ]'
+DISK=$(cat "$W/cache/ejemplo.com"/* 2>/dev/null | wc -c); IDX=$(stat -c %s "$W/cache/ejemplo.com/index.zc" 2>/dev/null || echo 0)
+check "archivos expulsados se borran"        '[ "$NOBJ" -ge 1 ] && [ $((DISK - IDX)) -le $((2000 + 64 * NOBJ)) ] && [ $(ls "$W/cache/ejemplo.com" | grep -c "\.tmp\.") = 0 ]'
 stop_demo
 
 echo
-echo "e2e: $OK ok, $FAIL fallos"
+echo "e2e ($BIN): $OK ok, $FAIL fallos"
 [ $FAIL = 0 ]

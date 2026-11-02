@@ -4,3 +4,6 @@ certs/
 tools/zc_p3_demo
 tests/test_*
 !tests/test_*.c
+zonal-cache
+.env
+*.log

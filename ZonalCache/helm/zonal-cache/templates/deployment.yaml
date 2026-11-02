@@ -15,6 +15,7 @@ spec:
         checksum/env: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
       securityContext: { runAsNonRoot: true, runAsUser: 10001, fsGroup: 10001 }
+      terminationGracePeriodSeconds: 30   # SIGTERM -> la caché guarda sus índices antes de salir
       containers:
         - name: zonal-cache
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -28,7 +29,7 @@ spec:
             - { name: https, containerPort: 8443 }
             {{- end }}
           readinessProbe:
-            tcpSocket: { port: http }
+            httpGet: { path: /__zc/healthz, port: http }   # 200 solo cuando ya cargó la config de Firebase
             periodSeconds: 5
           livenessProbe:
             tcpSocket: { port: http }
@@ -38,6 +39,9 @@ spec:
             - { name: cache, mountPath: /var/cache/zc }
             {{- if .Values.config.file }}
             - { name: config, mountPath: {{ dir .Values.config.file }}, readOnly: true }
+            {{- end }}
+            {{- if .Values.origin.caSecretName }}
+            - { name: origin-ca, mountPath: /etc/zc/origin-ca, readOnly: true }
             {{- end }}
             {{- if .Values.tls.enabled }}
             - { name: tls, mountPath: /etc/zc/tls, readOnly: true }
@@ -52,6 +56,10 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- if .Values.origin.caSecretName }}
+        - name: origin-ca
+          secret: { secretName: {{ .Values.origin.caSecretName }} }
+        {{- end }}
         {{- if .Values.config.file }}
         - name: config
           configMap: { name: {{ include "zc.fullname" . }}-config, items: [ { key: config.json, path: {{ base .Values.config.file }} } ] }

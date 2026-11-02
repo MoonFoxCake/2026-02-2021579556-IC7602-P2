@@ -1,18 +1,21 @@
 # Zonal Cache — Módulos de la Persona 3
 
 Políticas de reemplazo, autenticación (x-api-key y usuario/contraseña con sesiones), SSL termination y
-lectura de configuración. Están escritos como **biblioteca en GNU C** (`libzc_p3.a`) para que el servidor HTTP
-de la Persona 2 los llame, sin tocar sus archivos (evita conflictos de merge).
+lectura de configuración. Están escritos como **biblioteca en GNU C** (`libzc_p3.a`). El servidor real de la caché
+(`src/zonal_cache.c`: sockets, proxy al origen con libcurl y objetos en disco) la usa por medio de `zc_gate`.
 
 ## Compilar y probar
 
 ```bash
 sudo apt-get install -y build-essential libcurl4-openssl-dev libssl-dev
 cd ZonalCache
-make          # genera libzc_p3.a
-make test     # 7 suites unitarias
-make e2e      # 29 pruebas con curl (demo + mock)
-make e2e-api  # 16 pruebas contra api-nodejs (ver docs/COMO-CORRER.md)
+make             # zonal-cache (servidor real) + libzc_p3.a + demo
+make test        # 7 suites unitarias (342 comprobaciones)
+make e2e         # 29 pruebas: servidor real + mock del API + origen real
+make e2e-proxy   # 49 pruebas del proxy con orígenes HTTP/HTTPS reales
+make e2e-api     # 16 pruebas contra el router real de api-nodejs
+make e2e-sistema # 11 pruebas: dig -> DNS Interceptor -> API -> cachés cr/us -> origen
+make check       # todo lo anterior
 ```
 
 > Guía completa de ejecución y estado de integración: [`COMO-CORRER.md`](COMO-CORRER.md).
@@ -26,6 +29,8 @@ make e2e-api  # 16 pruebas contra api-nodejs (ver docs/COMO-CORRER.md)
 | `p3/zc_auth.[ch]` | `x-api-key` (SHA-256), login usuario/contraseña, sesiones por cookie, rate limit, formulario HTML, utilidades. |
 | `p3/zc_tls.[ch]` | SSL termination con OpenSSL (TLS ≥ 1.2). |
 | `p3/json_lite.h` | Parser JSON tomado del `dns.c` del equipo. |
+| `src/zonal_cache.c` | **Servidor real**: HTTP/HTTPS, `zc_gate`, HIT desde disco, proxy al origen (libcurl, HTTP y HTTPS, todos los verbos), guardar y expulsar. |
+| `tests/origin.mjs` | Origen de prueba (hace de Apache / REST API / sitio HTTPS) para las pruebas e2e. |
 | `scripts/gen-dev-cert.sh` | Certificado autofirmado para pruebas. |
 
 ## Variables de entorno (nada quemado en código)
@@ -54,7 +59,7 @@ key; en Firestore nunca guardar la key en claro), `cacheBytes`, `fileTypes[{ext,
 `{"domain","pattern","username","password"}` → `200` credenciales válidas, `401/403` inválidas, otro código = error.
 El API debe guardar las contraseñas con bcrypt/argon2.
 
-## Cómo lo integra la Persona 2 (flujo por petición)
+## Cómo lo usa el servidor (`src/zonal_cache.c`, flujo por petición)
 
 ```c
 zc_cfg_handle_t *h = zc_cfg_acquire();
@@ -84,16 +89,10 @@ zc_index_put(ix_del_dominio, key, bytes, ft->ttl, ft->policy, now, borrar_archiv
 - TLS: `zc_tls_ctx_from_env()` una vez; por conexión `zc_tls_accept` → `zc_tls_read/write` → `zc_tls_close`.
   Con TLS use `ZC_COOKIE_SECURE=1`; en pruebas con HTTP use `0`.
 
-## Pruebas manuales (cuando esté integrado el servidor)
+## Pruebas manuales
 
-```bash
-curl -i  http://localhost:8080/api/x                         # 401 sin key
-curl -i -H "x-api-key: MI_KEY" http://localhost:8080/api/x   # 200
-curl -i  http://localhost:8080/privado/a.png                 # 302 a /__zc/login
-curl -i -c jar -d "username=u&password=p&return_to=/privado/a.png" http://localhost:8080/__zc/login
-curl -i -b jar http://localhost:8080/privado/a.png           # 200 (MISS) y luego HIT
-scripts/gen-dev-cert.sh ./certs localhost && curl -k https://localhost:8443/
-```
+Paso a paso de cada requisito del enunciado (R1–R9) con los comandos y la salida esperada:
+[`COMO-CORRER.md`, sección 3](COMO-CORRER.md#3-correr-a-mano-y-probar-cada-requisito-del-enunciado).
 
 ## Estado
 
@@ -105,7 +104,8 @@ scripts/gen-dev-cert.sh ./certs localhost && curl -k https://localhost:8443/
 | Usuario/contraseña + sesión + logout + rate limit | Funciona (verificador inyectable; el HTTP real depende del API de la Persona 4) |
 | SSL termination | Funciona (probado con handshake TLS real) |
 | Config desde API Node.js con refresco | Funciona contra `api-nodejs` (`src/cache-routes.js`) con Firestore simulado; falta probar con Firestore real |
-| Integración en el servidor HTTP | Pendiente (Persona 2) |
+| Integración en el servidor HTTP (proxy real + disco) | Funciona: `src/zonal_cache.c`, 49 pruebas e2e con orígenes HTTP/HTTPS reales |
+| Docker / Helm | Imagen construida y probada con `docker run`; chart renderizado y validado; `scripts/deploy-k8s.sh` |
 
 ## Limitaciones conocidas
 

@@ -1,0 +1,15 @@
+Zonal Cache "{{ .Release.Name }}" (zona {{ .Values.zone }}) instalada.
+
+1. Ver el pod y la IP del servicio (esa IP es la que el DNS Interceptor/API debe devolver para la zona {{ .Values.zone }}):
+     kubectl get pods,svc -l app.kubernetes.io/instance={{ .Release.Name }}
+   Con minikube y Service LoadBalancer, deje corriendo en otra terminal:  minikube tunnel
+
+2. Salud (config de Firebase cargada):
+     kubectl port-forward svc/{{ include "zc.fullname" . }} 8080:{{ .Values.service.httpPort }}
+     curl http://127.0.0.1:8080/__zc/healthz
+
+3. Probar un dominio registrado (MISS y luego HIT):
+     curl -i -H "Host: <su-dominio>" http://127.0.0.1:8080/index.html
+
+4. Logs (una línea por petición con HIT/MISS/BYPASS):
+     kubectl logs -f deploy/{{ include "zc.fullname" . }}

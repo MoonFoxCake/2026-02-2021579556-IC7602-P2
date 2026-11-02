@@ -1,0 +1,12 @@
+*.o
+*.a
+tools/zc_p3_demo
+tests/test_policy
+tests/test_config
+tests/test_auth
+tests/test_tls
+tests/test_runtime
+tests/test_registry
+tests/test_gate
+certs/
+zonal-cache

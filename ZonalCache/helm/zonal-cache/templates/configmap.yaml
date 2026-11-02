@@ -20,6 +20,17 @@ data:
   ZC_CACHE_DIR: /var/cache/zc
   ZC_HTTP_PORT: "8080"
   ZC_HTTPS_PORT: "8443"
+  ZC_ORIGIN_TIMEOUT_SECS: {{ .Values.origin.timeoutSecs | quote }}
+  ZC_ORIGIN_CONNECT_TIMEOUT_SECS: {{ .Values.origin.connectTimeoutSecs | quote }}
+  ZC_ORIGIN_TLS_VERIFY: {{ .Values.origin.tlsVerify | quote }}
+  ZC_MAX_OBJECT_BYTES: {{ .Values.origin.maxObjectBytes | int64 | quote }}
+  ZC_MAX_REQUEST_BODY: {{ .Values.origin.maxRequestBody | int64 | quote }}
+  {{- if .Values.origin.caSecretName }}
+  ZC_ORIGIN_CA_FILE: /etc/zc/origin-ca/ca.crt
+  {{- end }}
+  {{- range $k, $v := .Values.extraEnv }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
   {{- if .Values.tls.enabled }}
   ZC_TLS_CERT_FILE: /etc/zc/tls/tls.crt
   ZC_TLS_KEY_FILE: /etc/zc/tls/tls.key

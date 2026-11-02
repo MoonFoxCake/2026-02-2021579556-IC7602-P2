@@ -8,11 +8,12 @@
 
 const dgram = require('dgram');
 const express = require('express');
+const { cors } = require('./cors');  // CORS es para que la UI pueda llamar al API desde el navegador
 
 const app = express();
 app.disable('x-powered-by');
+app.use(cors()); 
 app.use(express.json());
-
 const DB_CHECK_TIMEOUT_MS = 5000;
 
 function withTimeout(promise, ms) {
@@ -83,6 +84,10 @@ app.post('/api/dns_resolver', (req, res) => {
   });
 });
 
+
+// Cuenta de la persona usuaria (registro, login con JWT, sesion). Lo usa la UI.
+const { createAuthRouter } = require('./auth-routes');
+app.use('/api/auth', createAuthRouter());
 
 // Endpoints de servicio para las cachés zonales (config y verificación de credenciales).
 app.use('/api/cache', createCacheRouter({ store }));

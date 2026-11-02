@@ -4,7 +4,8 @@
  * Endpoints que consume la Zonal Cache (Persona 3). Traducen el modelo de Firestore de API.md
  * (domains, urls, apiKeys, urlUsers) al formato que lee la caché (ver ZonalCache/docs/ejemplo-config.json).
  *
- *   GET  /api/cache/config               -> { domains: [...] }   (solo dominios verificados por TXT)
+ *   GET  /api/cache/config?zone=cr       -> { domains: [...] }   (solo dominios verificados por TXT; si un dominio
+ *                                           define "zones", solo se entrega a las cachés de esas zonas)
  *   POST /api/cache/verify-credentials   -> { valid } 200 | 401  (usuario/contraseña de una URL)
  *
  * Autenticación de servicio: "Authorization: Bearer <secreto>" o "x-service-key: <secreto>", comparada en
@@ -28,7 +29,8 @@ function safeEqual(a, b) {
 }
 
 /** Convierte documentos de Firestore al JSON de configuración de la caché. Función pura (fácil de probar). */
-function buildCacheConfig({ domains, urls, apiKeys }) {
+function buildCacheConfig({ domains, urls, apiKeys, zone }) {
+  const z = zone ? String(zone).toLowerCase() : '';
   const keysByUrl = new Map();
   for (const k of apiKeys || []) {
     if (!k || !k.urlId || typeof k.keyHash !== 'string') continue;
@@ -39,6 +41,9 @@ function buildCacheConfig({ domains, urls, apiKeys }) {
   const out = [];
   for (const d of domains || []) {
     if (!d || !d.domain || d.verified !== true) continue; // solo dominios verificados
+    // Zonas: por defecto TODAS las cachés sirven todos los dominios (un cliente de CR y uno de US pueden pedir el
+    // mismo sitio). Si el dominio trae "zones" (opcional), solo se entrega a las cachés de esas zonas.
+    if (z && Array.isArray(d.zones) && d.zones.length && !d.zones.map((x) => String(x).toLowerCase()).includes(z)) continue;
     const domainUrls = (urls || []).filter((u) => u && u.domain === d.domain && u.pattern);
 
     const rules = domainUrls.map((u) => {
@@ -122,7 +127,7 @@ function createCacheRouter({ store = firestoreStore(), compare, serviceKey } = {
   router.get('/config', async (req, res, next) => {
     try {
       const [domains, urls, apiKeys] = await Promise.all([store.listDomains(), store.listUrls(), store.listApiKeys()]);
-      res.set('Cache-Control', 'no-store').json(buildCacheConfig({ domains, urls, apiKeys }));
+      res.set('Cache-Control', 'no-store').json(buildCacheConfig({ domains, urls, apiKeys, zone: req.query.zone }));
     } catch (e) { next(e); }
   });
 

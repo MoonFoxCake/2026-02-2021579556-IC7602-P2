@@ -3,6 +3,7 @@ import { ApiError, api, type ApiKey, type Domain, type UrlRule, type UrlRuleInpu
 
 type Props = { signedIn: boolean; onUnauthorized: () => void }
 type Message = { tone: 'error' | 'success' | 'info'; text: string } | null
+type LoadStatus = 'loading' | 'ready' | 'error'
 
 function errorText(error: unknown, onUnauthorized: () => void) {
   if (error instanceof ApiError && error.status === 401) onUnauthorized()
@@ -27,6 +28,16 @@ function Action({ children, secondary = false, ...props }: React.ButtonHTMLAttri
   return <button {...props} className={`inline-flex min-h-10 items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:cursor-not-allowed disabled:opacity-50 ${secondary ? 'border border-slate-200 bg-white text-slate-800 hover:bg-slate-50' : 'bg-indigo-600 text-white hover:bg-indigo-700'} ${props.className ?? ''}`}>{children}</button>
 }
 
+function DataState({ status, emptyText, error, retry, children }: { status: LoadStatus; emptyText: string; error?: string; retry: () => void; children: ReactNode }) {
+  if (status === 'loading') return <p role="status" aria-live="polite" className="text-sm text-slate-500">Cargando datos guardados…</p>
+  if (status === 'error') return <div role="alert" className="grid justify-items-start gap-3"><p className="text-sm text-rose-800">{error || 'No se pudieron cargar los datos.'}</p><Action type="button" secondary onClick={retry}>Reintentar</Action></div>
+  return children || <p className="text-sm text-slate-500">{emptyText}</p>
+}
+
+function CreatedAt({ value }: { value: string | null }) {
+  return value ? <p className="mt-1 text-xs text-slate-500">Creado {new Date(value).toLocaleString()}</p> : null
+}
+
 const fieldClass = 'control'
 
 export function DomainsPage({ signedIn, onUnauthorized }: Props) {
@@ -34,12 +45,16 @@ export function DomainsPage({ signedIn, onUnauthorized }: Props) {
   const [domain, setDomain] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<Message>(null)
+  const [loadStatus, setLoadStatus] = useState<LoadStatus>('loading')
+  const [loadAttempt, setLoadAttempt] = useState(0)
+  const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
     let active = true
-    if (signedIn) void api.listDomains().then((value) => { if (active) setDomains(value) }).catch((error) => { if (active) setMessage({ tone: 'error', text: errorText(error, onUnauthorized) }) })
+    if (!signedIn) return () => { active = false }
+    void api.listDomains().then((value) => { if (active) { setDomains(value); setLoadError(''); setLoadStatus('ready') } }).catch((error) => { if (active) { setLoadError(errorText(error, onUnauthorized)); setLoadStatus('error') } })
     return () => { active = false }
-  }, [signedIn, onUnauthorized])
+  }, [signedIn, onUnauthorized, loadAttempt])
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setMessage(null)
@@ -70,7 +85,7 @@ export function DomainsPage({ signedIn, onUnauthorized }: Props) {
     <form className="grid gap-4" onSubmit={create}><label className="grid gap-2 text-sm font-medium">Dominio o wildcard<input className={fieldClass} required maxLength={255} placeholder="ejemplo.com o *.ejemplo.com" value={domain} onChange={(event) => setDomain(event.target.value)} /></label><Action disabled={!signedIn || busy}>{busy ? 'Procesando…' : 'Registrar dominio'}</Action><MessageBox message={message} /></form>
     <p className="mt-4 text-xs leading-5 text-slate-500">La API devuelve el nombre y valor TXT únicos que debes publicar en DNS. La verificación consulta el DNS y habilita el dominio para los servicios.</p>
   </Card><Card title="Mis dominios">
-    {!signedIn ? <p className="text-sm text-slate-500">La lista aparece al iniciar sesión.</p> : domains.length === 0 ? <p className="text-sm text-slate-500">Aún no hay dominios registrados.</p> : <div className="space-y-4">{domains.map((item) => <article key={item.domain} className="rounded-xl border border-slate-200 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold">{item.domain}</h3><p className={`mt-1 text-xs font-semibold ${item.verified ? 'text-emerald-700' : 'text-amber-800'}`}>{item.verified ? `Verificado${item.verifiedAt ? ` · ${new Date(item.verifiedAt).toLocaleString()}` : ''}` : 'Pendiente de verificación TXT'}</p></div><div className="flex gap-2"><Action secondary disabled={busy || item.verified} onClick={() => void verify(item)}>{item.verified ? 'Verificado' : 'Verificar TXT'}</Action><Action secondary disabled={busy} onClick={() => void remove(item)}>Eliminar</Action></div></div>{item.txt && <dl className="mt-4 grid gap-2 rounded-lg bg-slate-50 p-3 text-xs sm:grid-cols-[5rem_1fr]"><dt className="font-semibold text-slate-600">Tipo</dt><dd>{item.txt.type}</dd><dt className="font-semibold text-slate-600">Nombre</dt><dd className="break-all font-mono">{item.txt.name}</dd><dt className="font-semibold text-slate-600">Valor</dt><dd className="break-all font-mono">{item.txt.value}</dd></dl>}</article>)}</div>}
+    {!signedIn ? <p className="text-sm text-slate-500">La lista aparece al iniciar sesión.</p> : <DataState status={loadStatus} error={loadError} emptyText="Aún no hay dominios registrados." retry={() => { setLoadError(''); setLoadStatus('loading'); setLoadAttempt((value) => value + 1) }}>{domains.length > 0 && <div className="space-y-4">{domains.map((item) => <article key={item.domain} className="rounded-xl border border-slate-200 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold">{item.domain}</h3><CreatedAt value={item.createdAt} /><p className={`mt-1 text-xs font-semibold ${item.verified ? 'text-emerald-700' : 'text-amber-800'}`}>{item.verified ? `Verificado${item.verifiedAt ? ` · ${new Date(item.verifiedAt).toLocaleString()}` : ''}` : 'Pendiente de verificación TXT'}</p></div><div className="flex gap-2"><Action secondary disabled={busy || item.verified} onClick={() => void verify(item)}>{item.verified ? 'Verificado' : 'Verificar TXT'}</Action><Action secondary disabled={busy} onClick={() => void remove(item)}>Eliminar</Action></div></div>{item.txt && <dl className="mt-4 grid gap-2 rounded-lg bg-slate-50 p-3 text-xs sm:grid-cols-[5rem_1fr]"><dt className="font-semibold text-slate-600">Tipo</dt><dd>{item.txt.type}</dd><dt className="font-semibold text-slate-600">Nombre</dt><dd className="break-all font-mono">{item.txt.name}</dd><dt className="font-semibold text-slate-600">Valor</dt><dd className="break-all font-mono">{item.txt.value}</dd></dl>}</article>)}</div>}</DataState>}
   </Card></div>
 }
 
@@ -86,18 +101,26 @@ export function RulesPage({ signedIn, onUnauthorized }: Props) {
   const [form, setForm] = useState<RuleForm>(emptyRule)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<Message>(null)
+  const [domainsStatus, setDomainsStatus] = useState<LoadStatus>('loading')
+  const [urlsStatus, setUrlsStatus] = useState<LoadStatus>('loading')
+  const [domainsAttempt, setDomainsAttempt] = useState(0)
+  const [urlsAttempt, setUrlsAttempt] = useState(0)
+  const [domainsError, setDomainsError] = useState('')
+  const [urlsError, setUrlsError] = useState('')
 
   useEffect(() => {
     let active = true
-    if (signedIn) void api.listDomains().then((value) => { if (active) { setDomains(value); setDomain((current) => current || value.find((item) => item.verified)?.domain || value[0]?.domain || '') } }).catch((error) => { if (active) setMessage({ tone: 'error', text: errorText(error, onUnauthorized) }) })
+    if (!signedIn) return () => { active = false }
+    void api.listDomains().then((value) => { if (active) { setDomains(value); setDomainsError(''); setDomain((current) => current && value.some((item) => item.domain === current) ? current : value.find((item) => item.verified)?.domain || value[0]?.domain || ''); setDomainsStatus('ready') } }).catch((error) => { if (active) { setDomainsError(errorText(error, onUnauthorized)); setDomainsStatus('error') } })
     return () => { active = false }
-  }, [signedIn, onUnauthorized])
+  }, [signedIn, onUnauthorized, domainsAttempt])
 
   useEffect(() => {
     let active = true
-    if (signedIn && domain) void api.listUrls(domain).then((value) => { if (active) setUrls(value) }).catch((error) => { if (active) setMessage({ tone: 'error', text: errorText(error, onUnauthorized) }) })
+    if (!signedIn || !domain) return () => { active = false }
+    void api.listUrls(domain).then((value) => { if (active) { setUrls(value); setUrlsError(''); setUrlsStatus('ready') } }).catch((error) => { if (active) { setUrlsError(errorText(error, onUnauthorized)); setUrlsStatus('error') } })
     return () => { active = false }
-  }, [signedIn, domain, onUnauthorized])
+  }, [signedIn, domain, onUnauthorized, urlsAttempt])
 
   function edit(item: UrlRule) {
     setEditing(item.id)
@@ -124,8 +147,8 @@ export function RulesPage({ signedIn, onUnauthorized }: Props) {
   }
 
   return <div className="grid gap-5 xl:grid-cols-2"><NoticeSignIn signedIn={signedIn} /><Card title={editing ? 'Editar regla' : 'Nueva regla de caché'}>
-    {!signedIn ? <p className="text-sm text-slate-500">Inicia sesión para administrar reglas.</p> : domains.length === 0 ? <p className="text-sm text-slate-500">Registra un dominio antes de crear URLs.</p> : <form className="grid gap-4" onSubmit={save}>
-      <label className="grid gap-2 text-sm font-medium">Dominio<select className={fieldClass} required value={domain} onChange={(event) => { setDomain(event.target.value); setUrls([]); reset() }}>{domains.map((item) => <option key={item.domain} value={item.domain}>{item.domain}{item.verified ? '' : ' · TXT pendiente'}</option>)}</select></label>
+    {!signedIn ? <p className="text-sm text-slate-500">Inicia sesión para administrar reglas.</p> : <DataState status={domainsStatus} error={domainsError} emptyText="Registra un dominio antes de crear URLs." retry={() => { setDomainsError(''); setDomainsStatus('loading'); setDomainsAttempt((value) => value + 1) }}>{domains.length > 0 && <form className="grid gap-4" onSubmit={save}>
+      <label className="grid gap-2 text-sm font-medium">Dominio<select className={fieldClass} required value={domain} onChange={(event) => { setDomain(event.target.value); setUrls([]); setUrlsStatus('loading'); reset() }}>{domains.map((item) => <option key={item.domain} value={item.domain}>{item.domain}{item.verified ? '' : ' · TXT pendiente'}</option>)}</select></label>
       <label className="grid gap-2 text-sm font-medium">Patrón wildcard<input className={fieldClass} required maxLength={200} pattern="/.*" placeholder="/imagenes/*" value={form.pattern} onChange={(event) => setForm({ ...form, pattern: event.target.value })} /></label>
       <label className="grid gap-2 text-sm font-medium">Origen HTTP/HTTPS<input className={fieldClass} required type="url" placeholder="http://apache:80" value={form.origin} onChange={(event) => setForm({ ...form, origin: event.target.value })} /></label>
       <label className="grid gap-2 text-sm font-medium">Tamaño máximo de caché (MB)<input className={fieldClass} required type="number" min="1" step="1" value={form.cacheSizeMB} onChange={(event) => setForm({ ...form, cacheSizeMB: event.target.value })} /></label>
@@ -133,9 +156,9 @@ export function RulesPage({ signedIn, onUnauthorized }: Props) {
       <label className="grid gap-2 text-sm font-medium">Política de reemplazo<select className={fieldClass} value={form.replacementPolicy} onChange={(event) => setForm({ ...form, replacementPolicy: event.target.value as RuleForm['replacementPolicy'] })}>{policies.map((policy) => <option key={policy}>{policy}</option>)}</select></label>
       <label className="grid gap-2 text-sm font-medium">Autenticación de la URL<select className={fieldClass} value={form.authType} onChange={(event) => setForm({ ...form, authType: event.target.value as RuleForm['authType'] })}><option value="none">Sin autenticación</option><option value="apikey">API key</option><option value="userpass">Usuario y contraseña</option></select></label>
       <div className="flex flex-wrap gap-2"><Action disabled={busy || !domain}>{busy ? 'Guardando…' : editing ? 'Guardar cambios' : 'Crear regla'}</Action>{editing && <Action type="button" secondary onClick={reset}>Cancelar edición</Action>}</div><MessageBox message={message} />
-    </form>}
+    </form>}</DataState>}
   </Card><Card title={`URLs de ${domain || 'dominio'}${domain && !domains.find((item) => item.domain === domain)?.verified ? ' · dominio no verificado' : ''}`}>
-    {!signedIn ? <p className="text-sm text-slate-500">Inicia sesión para ver las URLs.</p> : urls.length === 0 ? <p className="text-sm text-slate-500">No hay reglas para este dominio.</p> : <div className="space-y-3">{urls.map((item) => <article key={item.id} className="rounded-xl border border-slate-200 p-4"><div className="flex flex-wrap justify-between gap-3"><div className="min-w-0"><h3 className="break-all font-semibold">{item.pattern}</h3><p className="mt-1 break-all text-xs text-slate-500">{item.origin}</p></div><span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-800">{item.authType}</span></div><p className="mt-3 text-xs text-slate-600">{item.cacheSizeMB} MB · {item.replacementPolicy} · {item.fileTypes.map((file) => `.${file.ext}: ${file.ttlSeconds}s`).join(', ') || 'sin TTL por tipo'}</p><div className="mt-3 flex gap-2"><Action secondary disabled={busy} onClick={() => edit(item)}>Editar</Action><Action secondary disabled={busy} onClick={() => void remove(item)}>Eliminar</Action></div></article>)}</div>}
+    {!signedIn ? <p className="text-sm text-slate-500">Inicia sesión para ver las URLs.</p> : domainsStatus === 'loading' ? <DataState status="loading" emptyText="" retry={() => undefined}>{null}</DataState> : domainsStatus === 'error' ? <DataState status="error" error={domainsError} emptyText="" retry={() => { setDomainsError(''); setDomainsStatus('loading'); setDomainsAttempt((value) => value + 1) }}>{null}</DataState> : !domain ? <p className="text-sm text-slate-500">Registra un dominio para ver sus URLs.</p> : <DataState status={urlsStatus} error={urlsError} emptyText="No hay reglas para este dominio." retry={() => { setUrlsError(''); setUrlsStatus('loading'); setUrlsAttempt((value) => value + 1) }}>{urls.length > 0 && <div className="space-y-3">{urls.map((item) => <article key={item.id} className="rounded-xl border border-slate-200 p-4"><div className="flex flex-wrap justify-between gap-3"><div className="min-w-0"><h3 className="break-all font-semibold">{item.pattern}</h3><p className="mt-1 break-all text-xs text-slate-500">{item.origin}</p><CreatedAt value={item.createdAt} /></div><span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-800">{item.authType}</span></div><p className="mt-3 text-xs text-slate-600">{item.cacheSizeMB} MB · {item.replacementPolicy} · {item.fileTypes.map((file) => `.${file.ext}: ${file.ttlSeconds}s`).join(', ') || 'sin TTL por tipo'}</p><div className="mt-3 flex gap-2"><Action secondary disabled={busy} onClick={() => edit(item)}>Editar</Action><Action secondary disabled={busy} onClick={() => void remove(item)}>Eliminar</Action></div></article>)}</div>}</DataState>}
   </Card></div>
 }
 
@@ -152,26 +175,39 @@ export function AccessPage({ signedIn, onUnauthorized }: Props) {
   const [passwordEdits, setPasswordEdits] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<Message>(null)
+  const [domainsStatus, setDomainsStatus] = useState<LoadStatus>('loading')
+  const [urlsStatus, setUrlsStatus] = useState<LoadStatus>('loading')
+  const [credentialsStatus, setCredentialsStatus] = useState<LoadStatus>('loading')
+  const [domainsAttempt, setDomainsAttempt] = useState(0)
+  const [urlsAttempt, setUrlsAttempt] = useState(0)
+  const [credentialsAttempt, setCredentialsAttempt] = useState(0)
+  const [domainsError, setDomainsError] = useState('')
+  const [urlsError, setUrlsError] = useState('')
+  const [credentialsError, setCredentialsError] = useState('')
   const selectedUrl = urls.find((item) => item.id === urlId)
+  const selectedAuthType = selectedUrl?.authType
   const keys = keyList?.urlId === urlId ? keyList.items : []
   const users = userList?.urlId === urlId ? userList.items : []
 
   useEffect(() => {
     let active = true
-    if (signedIn) void api.listDomains().then((value) => { if (active) { setDomains(value); setDomain((current) => current || value[0]?.domain || '') } }).catch((error) => { if (active) setMessage({ tone: 'error', text: errorText(error, onUnauthorized) }) })
+    if (!signedIn) return () => { active = false }
+    void api.listDomains().then((value) => { if (active) { setDomains(value); setDomainsError(''); setDomain((current) => current && value.some((item) => item.domain === current) ? current : value[0]?.domain || ''); setDomainsStatus('ready') } }).catch((error) => { if (active) { setDomainsError(errorText(error, onUnauthorized)); setDomainsStatus('error') } })
     return () => { active = false }
-  }, [signedIn, onUnauthorized])
+  }, [signedIn, onUnauthorized, domainsAttempt])
   useEffect(() => {
     let active = true
-    if (signedIn && domain) void api.listUrls(domain).then((value) => { if (active) { setUrls(value); setUrlId((current) => value.some((item) => item.id === current) ? current : value[0]?.id || '') } }).catch((error) => { if (active) setMessage({ tone: 'error', text: errorText(error, onUnauthorized) }) })
+    if (!signedIn || !domain) return () => { active = false }
+    void api.listUrls(domain).then((value) => { if (active) { setUrls(value); setUrlsError(''); setCredentialsStatus('loading'); setUrlId((current) => value.some((item) => item.id === current) ? current : value[0]?.id || ''); setUrlsStatus('ready') } }).catch((error) => { if (active) { setUrlsError(errorText(error, onUnauthorized)); setUrlsStatus('error') } })
     return () => { active = false }
-  }, [signedIn, domain, onUnauthorized])
+  }, [signedIn, domain, onUnauthorized, urlsAttempt])
   useEffect(() => {
     let active = true
-    if (signedIn && selectedUrl?.authType === 'apikey') void api.listApiKeys(urlId).then((value) => { if (active) setKeyList({ urlId, items: value }) }).catch((error) => { if (active) setMessage({ tone: 'error', text: errorText(error, onUnauthorized) }) })
-    if (signedIn && selectedUrl?.authType === 'userpass') void api.listUsers(urlId).then((value) => { if (active) setUserList({ urlId, items: value }) }).catch((error) => { if (active) setMessage({ tone: 'error', text: errorText(error, onUnauthorized) }) })
+    if (!signedIn || !selectedAuthType || selectedAuthType === 'none') return () => { active = false }
+    const load = selectedAuthType === 'apikey' ? api.listApiKeys(urlId).then((items) => { if (active) setKeyList({ urlId, items }) }) : api.listUsers(urlId).then((items) => { if (active) setUserList({ urlId, items }) })
+    void load.then(() => { if (active) { setCredentialsError(''); setCredentialsStatus('ready') } }).catch((error) => { if (active) { setCredentialsError(errorText(error, onUnauthorized)); setCredentialsStatus('error') } })
     return () => { active = false }
-  }, [signedIn, urlId, selectedUrl?.authType, onUnauthorized])
+  }, [signedIn, urlId, selectedAuthType, onUnauthorized, credentialsAttempt])
 
   async function createKey() {
     setBusy(true); setMessage(null)
@@ -205,9 +241,9 @@ export function AccessPage({ signedIn, onUnauthorized }: Props) {
   }
 
   return <div className="grid gap-5 xl:grid-cols-2"><NoticeSignIn signedIn={signedIn} /><Card title="Seleccionar URL">
-    {!signedIn ? <p className="text-sm text-slate-500">Inicia sesión para administrar credenciales.</p> : domains.length === 0 ? <p className="text-sm text-slate-500">Registra un dominio y crea una URL para gestionar sus accesos.</p> : <div className="grid gap-4"><label className="grid gap-2 text-sm font-medium">Dominio<select className={fieldClass} value={domain} onChange={(event) => { setDomain(event.target.value); setUrls([]); setUrlId(''); setCreatedKey(null) }}>{domains.map((item) => <option key={item.domain}>{item.domain}</option>)}</select></label><label className="grid gap-2 text-sm font-medium">URL<select className={fieldClass} value={urlId} onChange={(event) => { setUrlId(event.target.value); setCreatedKey(null) }}>{urls.map((item) => <option key={item.id} value={item.id}>{item.pattern} · {item.authType}</option>)}</select></label>{selectedUrl && <p className="text-xs leading-5 text-slate-500">La URL usa {selectedUrl.authType === 'apikey' ? 'API keys' : selectedUrl.authType === 'userpass' ? 'usuarios y contraseña' : 'sin autenticación'}.</p>}</div>}
+    {!signedIn ? <p className="text-sm text-slate-500">Inicia sesión para administrar credenciales.</p> : <DataState status={domainsStatus} error={domainsError} emptyText="Registra un dominio y crea una URL para gestionar sus accesos." retry={() => { setDomainsError(''); setDomainsStatus('loading'); setDomainsAttempt((value) => value + 1) }}>{domains.length > 0 && <div className="grid gap-4"><label className="grid gap-2 text-sm font-medium">Dominio<select className={fieldClass} value={domain} onChange={(event) => { setDomain(event.target.value); setUrls([]); setUrlId(''); setUrlsStatus('loading'); setCreatedKey(null) }}>{domains.map((item) => <option key={item.domain} value={item.domain}>{item.domain}</option>)}</select></label><DataState status={urlsStatus} error={urlsError} emptyText="Este dominio aún no tiene URLs." retry={() => { setUrlsError(''); setUrlsStatus('loading'); setUrlsAttempt((value) => value + 1) }}>{urls.length > 0 && <label className="grid gap-2 text-sm font-medium">URL<select className={fieldClass} value={urlId} onChange={(event) => { setUrlId(event.target.value); setCredentialsStatus('loading'); setCreatedKey(null) }}>{urls.map((item) => <option key={item.id} value={item.id}>{item.pattern} · {item.authType}</option>)}</select></label>}</DataState>{selectedUrl && <p className="text-xs leading-5 text-slate-500">La URL usa {selectedUrl.authType === 'apikey' ? 'API keys' : selectedUrl.authType === 'userpass' ? 'usuarios y contraseña' : 'sin autenticación'}.</p>}</div>}</DataState>}
       </Card><Card title="Credenciales de la URL">
-    {!signedIn || !selectedUrl ? <p className="text-sm text-slate-500">Selecciona una URL para continuar.</p> : selectedUrl.authType === 'none' ? <p className="text-sm text-slate-500">Esta URL no requiere credenciales. Cambia su modo de autenticación en Reglas de caché.</p> : selectedUrl.authType === 'apikey' ? <div className="grid gap-4"><Action disabled={busy} onClick={() => void createKey()}>{busy ? 'Procesando…' : 'Crear API key'}</Action>{createdKey?.urlId === urlId && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4"><p className="text-sm font-semibold text-amber-950">Copia esta clave ahora; no volverá a mostrarse:</p><code className="mt-2 block break-all text-sm text-amber-900">{createdKey.value}</code><button type="button" className="mt-2 text-sm font-semibold underline" onClick={() => void navigator.clipboard?.writeText(createdKey.value)}>Copiar clave</button></div>}{keys.length === 0 ? <p className="text-sm text-slate-500">No hay claves activas.</p> : keys.map((key) => <div key={key.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 p-3"><span className="text-sm"><code>{key.prefix}…</code><span className="ml-2 text-xs text-slate-500">{key.createdAt ? new Date(key.createdAt).toLocaleDateString() : ''}</span></span><Action secondary disabled={busy} onClick={() => void removeKey(key)}>Revocar</Action></div>)}</div> : <div className="grid gap-5"><form className="grid gap-3 rounded-xl bg-slate-50 p-4" onSubmit={saveUser}><h3 className="text-sm font-semibold">Agregar usuario</h3><label className="grid gap-2 text-sm">Nombre de usuario<input className={fieldClass} required minLength={3} maxLength={32} pattern="[A-Za-z0-9._-]+" value={username} onChange={(event) => setUsername(event.target.value)} /></label><label className="grid gap-2 text-sm">Contraseña<input className={fieldClass} required minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} /><span className="text-xs text-slate-500">Al menos 8 caracteres; máximo 72 bytes.</span></label><Action disabled={busy}>{busy ? 'Guardando…' : 'Crear usuario'}</Action></form>{users.length === 0 ? <p className="text-sm text-slate-500">No hay usuarios registrados.</p> : users.map((user) => <div key={user.username} className="grid gap-3 rounded-xl border border-slate-200 p-4 sm:grid-cols-[1fr_auto]"><div><p className="font-semibold">{user.username}</p><p className="text-xs text-slate-500">Contraseña protegida; no se puede consultar.</p><label className="mt-3 grid gap-2 text-sm">Cambiar contraseña<input className={fieldClass} type="password" minLength={8} value={passwordEdits[user.username] || ''} onChange={(event) => setPasswordEdits((current) => ({ ...current, [user.username]: event.target.value }))} /></label></div><div className="flex flex-wrap gap-2 sm:flex-col sm:items-end"><Action secondary disabled={busy} onClick={() => void updateUser(user.username)}>Actualizar</Action><Action secondary disabled={busy} onClick={() => void removeUser(user)}>Eliminar</Action></div></div>)}</div>}
+    {!signedIn || !selectedUrl ? <p className="text-sm text-slate-500">Selecciona una URL para continuar.</p> : selectedUrl.authType === 'none' ? <p className="text-sm text-slate-500">Esta URL no requiere credenciales. Cambia su modo de autenticación en Reglas de caché.</p> : selectedUrl.authType === 'apikey' ? <div className="grid gap-4"><Action disabled={busy || credentialsStatus !== 'ready'} onClick={() => void createKey()}>{busy ? 'Procesando…' : 'Crear API key'}</Action>{createdKey?.urlId === urlId && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4"><p className="text-sm font-semibold text-amber-950">Copia esta clave ahora; no volverá a mostrarse:</p><code className="mt-2 block break-all text-sm text-amber-900">{createdKey.value}</code><button type="button" className="mt-2 text-sm font-semibold underline" onClick={() => void navigator.clipboard?.writeText(createdKey.value)}>Copiar clave</button></div>}<DataState status={credentialsStatus} error={credentialsError} emptyText="No hay claves activas." retry={() => { setCredentialsError(''); setCredentialsStatus('loading'); setCredentialsAttempt((value) => value + 1) }}>{keys.length > 0 && keys.map((key) => <div key={key.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 p-3"><span className="text-sm"><code>{key.prefix}…</code><CreatedAt value={key.createdAt} /></span><Action secondary disabled={busy} onClick={() => void removeKey(key)}>Revocar</Action></div>)}</DataState></div> : <div className="grid gap-5"><form className="grid gap-3 rounded-xl bg-slate-50 p-4" onSubmit={saveUser}><h3 className="text-sm font-semibold">Agregar usuario</h3><label className="grid gap-2 text-sm">Nombre de usuario<input className={fieldClass} required minLength={3} maxLength={32} pattern="[A-Za-z0-9._-]+" value={username} onChange={(event) => setUsername(event.target.value)} /></label><label className="grid gap-2 text-sm">Contraseña<input className={fieldClass} required minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} /><span className="text-xs text-slate-500">Al menos 8 caracteres; máximo 72 bytes.</span></label><Action disabled={busy || credentialsStatus !== 'ready'}>{busy ? 'Guardando…' : 'Crear usuario'}</Action></form><DataState status={credentialsStatus} error={credentialsError} emptyText="No hay usuarios registrados." retry={() => { setCredentialsError(''); setCredentialsStatus('loading'); setCredentialsAttempt((value) => value + 1) }}>{users.length > 0 && users.map((user) => <div key={user.username} className="grid gap-3 rounded-xl border border-slate-200 p-4 sm:grid-cols-[1fr_auto]"><div><p className="font-semibold">{user.username}</p><CreatedAt value={user.createdAt} /><p className="text-xs text-slate-500">Contraseña protegida; no se puede consultar.</p><label className="mt-3 grid gap-2 text-sm">Cambiar contraseña<input className={fieldClass} type="password" minLength={8} value={passwordEdits[user.username] || ''} onChange={(event) => setPasswordEdits((current) => ({ ...current, [user.username]: event.target.value }))} /></label></div><div className="flex flex-wrap gap-2 sm:flex-col sm:items-end"><Action secondary disabled={busy} onClick={() => void updateUser(user.username)}>Actualizar</Action><Action secondary disabled={busy} onClick={() => void removeUser(user)}>Eliminar</Action></div></div>)}</DataState></div>}
     <div className="mt-4"><MessageBox message={message} /></div>
   </Card></div>
 }

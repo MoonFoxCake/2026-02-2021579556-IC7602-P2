@@ -13,6 +13,13 @@ export class ApiError extends Error {
 type Account = { id: string; email: string }
 type LoginResponse = { token: string; expiresIn: number }
 export type Session = { user: Account }
+export type Domain = { domain: string; verified: boolean; verifiedAt: string | null; createdAt: string | null; txt?: { type: string; name: string; value: string } }
+export type FileTypeTtl = { ext: string; ttlSeconds: number }
+export type UrlRule = { id: string; domain: string; pattern: string; origin: string; cacheSizeMB: number; fileTypes: FileTypeTtl[]; replacementPolicy: 'LRU' | 'LFU' | 'FIFO' | 'MRU' | 'RANDOM'; authType: 'none' | 'apikey' | 'userpass'; createdAt: string | null }
+export type ApiKey = { id: string; prefix: string; createdAt: string | null }
+export type CreatedApiKey = ApiKey & { apiKey: string }
+export type UrlUser = { username: string; createdAt: string | null }
+export type UrlRuleInput = Omit<UrlRule, 'id' | 'domain' | 'createdAt'>
 
 let token: string | null = null
 
@@ -53,6 +60,7 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
 }
 
 export const api = {
+  health: async () => (await request<{ ok: boolean }>('/health')).ok,
   register: (email: string, password: string) => request<Account>('/auth/register', 'POST', { email, password }),
   async login(email: string, password: string): Promise<Session> {
     const result = await request<LoginResponse>('/auth/login', 'POST', { email, password })
@@ -64,7 +72,20 @@ export const api = {
       throw error
     }
   },
-  logout(): void {
-    token = null
-  },
+  logout(): void { token = null },
+  listDomains: async () => (await request<{ domains: Domain[] }>('/domains')).domains,
+  createDomain: (domain: string) => request<Domain & { instructions: string }>('/domains', 'POST', { domain }),
+  verifyDomain: (domain: string) => request<Domain & { message?: string }>('/domains/' + encodeURIComponent(domain) + '/verify', 'POST'),
+  deleteDomain: (domain: string) => request<{ deleted: boolean; domain: string }>('/domains/' + encodeURIComponent(domain), 'DELETE'),
+  listUrls: async (domain: string) => (await request<{ urls: UrlRule[] }>('/domains/' + encodeURIComponent(domain) + '/urls')).urls,
+  createUrl: (domain: string, input: UrlRuleInput) => request<UrlRule>('/domains/' + encodeURIComponent(domain) + '/urls', 'POST', input),
+  updateUrl: (id: string, input: Partial<UrlRuleInput>) => request<UrlRule>('/urls/' + encodeURIComponent(id), 'PUT', input),
+  deleteUrl: (id: string) => request<{ deleted: boolean; id: string }>('/urls/' + encodeURIComponent(id), 'DELETE'),
+  listApiKeys: async (id: string) => (await request<{ apiKeys: ApiKey[] }>('/urls/' + encodeURIComponent(id) + '/api-keys')).apiKeys,
+  createApiKey: (id: string) => request<CreatedApiKey>('/urls/' + encodeURIComponent(id) + '/api-keys', 'POST', {}),
+  deleteApiKey: (id: string) => request<{ deleted: boolean }>('/api-keys/' + encodeURIComponent(id), 'DELETE'),
+  listUsers: async (id: string) => (await request<{ users: UrlUser[] }>('/urls/' + encodeURIComponent(id) + '/users')).users,
+  createUser: (id: string, username: string, password: string) => request<UrlUser>('/urls/' + encodeURIComponent(id) + '/users', 'POST', { username, password }),
+  updateUser: (id: string, username: string, password: string) => request<{ username: string; updated: boolean }>('/urls/' + encodeURIComponent(id) + '/users/' + encodeURIComponent(username), 'PUT', { password }),
+  deleteUser: (id: string, username: string) => request<{ deleted: boolean }>('/urls/' + encodeURIComponent(id) + '/users/' + encodeURIComponent(username), 'DELETE'),
 }

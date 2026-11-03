@@ -1,0 +1,4 @@
+zone: us
+service:
+  httpNodePort: 31080
+  httpsNodePort: 31443

@@ -1,56 +1,186 @@
+import { useState, type FormEvent, type ReactNode } from 'react'
+import { Analytics } from '@vercel/analytics/react'
+import { SpeedInsights } from '@vercel/speed-insights/react'
+import { ApiError, api, type Session } from './api'
+
+type View = 'overview' | 'account' | 'domains' | 'rules' | 'access' | 'cache-login'
+type NoticeState = { tone: 'error' | 'success' | 'info'; text: string }
+
+const views: { id: View; label: string; detail: string }[] = [
+  { id: 'overview', label: 'Resumen', detail: 'Estado de integración' },
+  { id: 'account', label: 'Cuenta', detail: 'Registro e inicio de sesión' },
+  { id: 'domains', label: 'Dominios', detail: 'Registro TXT' },
+  { id: 'rules', label: 'Reglas de caché', detail: 'URLs y políticas' },
+  { id: 'access', label: 'Accesos', detail: 'Usuarios y claves por URL' },
+  { id: 'cache-login', label: 'Acceso a caché', detail: 'Sesión en caché zonal' },
+]
+
+function Button({ children, secondary = false, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { secondary?: boolean }) {
+  return <button {...props} className={`inline-flex min-h-10 items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:cursor-not-allowed disabled:opacity-50 ${secondary ? 'border border-slate-200 bg-white text-slate-800 hover:bg-slate-50' : 'bg-indigo-600 text-white hover:bg-indigo-700'} ${props.className ?? ''}`}>{children}</button>
+}
+function Panel({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
+  return <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6"><h2 className="text-base font-semibold tracking-tight text-slate-950">{title}</h2>{description && <p className="mt-1 text-sm leading-6 text-slate-500">{description}</p>}<div className="mt-5">{children}</div></section>
+}
+
+function PageHeading({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
+  return <div className="mb-7"><p className="text-xs font-bold uppercase tracking-[0.16em] text-indigo-700">{eyebrow}</p><h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">{title}</h1><p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600 sm:text-base">{description}</p></div>
+}
+
+function Notice({ value }: { value: NoticeState | null }) {
+  if (!value) return null
+  const tone = value.tone === 'error' ? 'border-rose-200 bg-rose-50 text-rose-800' : value.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-900'
+  return <p role={value.tone === 'error' ? 'alert' : 'status'} className={`rounded-xl border px-4 py-3 text-sm ${tone}`}>{value.text}</p>
+}
+
+function Status({ children, ready = false }: { children: ReactNode; ready?: boolean }) {
+  return <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${ready ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900'}`}><span aria-hidden="true" className={`size-1.5 rounded-full ${ready ? 'bg-emerald-600' : 'bg-amber-500'}`} />{children}</span>
+}
+
 export default function App() {
-  return (
-    <div className="mx-auto flex min-h-svh max-w-6xl flex-col px-6 sm:px-10">
-      <header className="flex items-center justify-between gap-4 border-b border-stone-200 py-7">
-        <div className="flex items-center gap-3">
-          <span className="flex size-10 items-center justify-center rounded-lg bg-stone-900 text-sm font-semibold text-white" aria-hidden="true">
-            P2
-          </span>
-          <p className="text-sm font-semibold tracking-tight">Redes <span className="font-normal text-stone-500">/ IC7602</span></p>
-        </div>
-        <span className="text-xs text-stone-600">Proyecto 02</span>
-      </header>
+  const [view, setView] = useState<View>('overview')
+  const [session, setSession] = useState<Session | null>(null)
+  const [apiAvailable, setApiAvailable] = useState(false)
+  const [notice, setNotice] = useState<NoticeState | null>(null)
+  const currentView = views.find((item) => item.id === view) ?? views[0]
 
-      <main className="flex flex-1 flex-col justify-center py-16 sm:py-24">
-        <p className="mb-6 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-blue-700">
-          <span className="size-1.5 rounded-full bg-blue-700" aria-hidden="true" />
-          Configuración inicial
-        </p>
-        <h1 className="max-w-3xl text-4xl font-semibold leading-tight tracking-tight text-balance sm:text-6xl">
-          Proxy y caché con geolocalización.
-        </h1>
-        <p className="mt-6 max-w-xl text-base leading-relaxed text-stone-600 sm:text-lg">
-          Un espacio para administrar dominios, configurar reglas de caché y gestionar el acceso a los recursos.
-        </p>
+  function logout() {
+    api.logout()
+    setSession(null)
+    setView('overview')
+    setNotice({ tone: 'info', text: 'La sesión local se cerró. El token se elimina de memoria.' })
+  }
 
-        <section aria-labelledby="status-heading" className="mt-14 grid gap-8 border-t border-stone-200 pt-8 md:grid-cols-[1fr_2fr] md:gap-16">
-          <div>
-            <h2 id="status-heading" className="text-sm font-semibold">Estado del proyecto</h2>
-            <p className="mt-2 max-w-xs text-sm leading-relaxed text-stone-600">
-              La base de la aplicación está lista. Las funciones de administración se implementarán en la siguiente etapa.
-            </p>
-          </div>
-          <dl className="divide-y divide-stone-200 text-sm">
-            <div className="flex items-center justify-between gap-4 pb-4">
-              <dt>Dominios y verificación DNS</dt>
-              <dd className="shrink-0 text-stone-500">Pendiente</dd>
-            </div>
-            <div className="flex items-center justify-between gap-4 py-4">
-              <dt>URLs y políticas de caché</dt>
-              <dd className="shrink-0 text-stone-500">Pendiente</dd>
-            </div>
-            <div className="flex items-center justify-between gap-4 pt-4">
-              <dt>Usuarios y claves de acceso</dt>
-              <dd className="shrink-0 text-stone-500">Pendiente</dd>
-            </div>
-          </dl>
-        </section>
-      </main>
+  const content = (() => {
+    switch (view) {
+      case 'account': return <AccountPage session={session} onAuthenticated={(value) => { setSession(value); setApiAvailable(true); setNotice(null) }} onApiResponded={() => setApiAvailable(true)} />
+      case 'domains': return <PendingPage kind="domains" />
+      case 'rules': return <PendingPage kind="rules" />
+      case 'access': return <PendingPage kind="access" />
+      case 'cache-login': return <PendingPage kind="cache-login" />
+      default: return <OverviewPage session={session} apiAvailable={apiAvailable} onNavigate={setView} />
+    }
+  })()
 
-      <footer className="flex flex-wrap justify-between gap-x-6 gap-y-2 border-t border-stone-200 py-6 text-xs text-stone-600">
-        <p>Tecnológico de Costa Rica</p>
-        <p>IC7602 · Segundo semestre 2026</p>
-      </footer>
+  return <div className="min-h-svh bg-[#f5f7fb] text-slate-900">
+    <aside className="border-b border-slate-200 bg-white lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:w-64 lg:flex-col lg:border-b-0 lg:border-r">
+      <div className="flex items-center gap-3 px-5 py-5 lg:px-6 lg:py-7"><span className="grid size-10 place-items-center rounded-xl bg-indigo-600 text-xs font-bold tracking-wide text-white">P2</span><div><p className="text-sm font-bold tracking-tight">Proyecto 2</p><p className="text-xs text-slate-500">Redes · IC7602</p></div></div>
+      <nav aria-label="Navegación principal" className="flex gap-1 overflow-x-auto px-3 pb-3 lg:flex-1 lg:flex-col lg:px-3 lg:py-2">
+        {views.map((item) => <button key={item.id} type="button" onClick={() => { setView(item.id); setNotice(null) }} aria-current={view === item.id ? 'page' : undefined} className={`shrink-0 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition focus-visible:outline-2 focus-visible:outline-indigo-600 lg:w-full ${view === item.id ? 'bg-indigo-50 text-indigo-800' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950'}`}><span className="block">{item.label}</span><span className={`hidden text-xs font-normal lg:block ${view === item.id ? 'text-indigo-600' : 'text-slate-400'}`}>{item.detail}</span></button>)}
+      </nav>
+      <div className="hidden border-t border-slate-100 p-5 lg:block"><p className="text-xs font-bold uppercase tracking-wider text-slate-400">Node API</p><div className="mt-3"><Status ready={apiAvailable}>{apiAvailable ? 'Respondió a una solicitud' : 'Conexión sin verificar'}</Status></div><p className="mt-2 text-xs leading-5 text-slate-400">La administración y el acceso a caché requieren rutas aún no implementadas.</p></div>
+    </aside>
+
+    <div className="lg:pl-64">
+      <header className="flex min-h-16 items-center justify-between gap-4 border-b border-slate-200 bg-white/80 px-5 sm:px-8"><p className="truncate text-xs text-slate-400">Consola / <span className="text-slate-600">{currentView.label}</span></p><div className="flex items-center gap-3">{session ? <><span className="hidden max-w-48 truncate text-sm text-slate-600 sm:inline">{session.user.email}</span><Button type="button" secondary onClick={logout}>Cerrar sesión</Button></> : <Button type="button" onClick={() => { setView('account'); setNotice(null) }}>Iniciar sesión</Button>}</div></header>
+      <main className="mx-auto max-w-7xl px-4 py-7 sm:px-8 sm:py-10"><div className="mb-5"><Notice value={notice} /></div>{content}<footer className="mt-12 border-t border-slate-200 pt-5 text-xs text-slate-400">Tecnológico de Costa Rica <span className="px-1">·</span> IC7602 <span className="px-1">·</span> Proyecto 2</footer></main>
     </div>
-  )
+    <Analytics /><SpeedInsights />
+  </div>
+}
+
+function OverviewPage({ session, apiAvailable, onNavigate }: { session: Session | null; apiAvailable: boolean; onNavigate: (view: View) => void }) {
+  return <>
+    <PageHeading eyebrow="Panel de control" title="Proxy y caché zonal" description="Consulta el estado de la cuenta y revisa qué integraciones ya están disponibles para la consola." />
+    <div className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-indigo-100 bg-indigo-50 px-5 py-4"><div><p className="text-sm font-semibold text-indigo-950">{session ? 'Sesión iniciada' : 'Consola lista'}</p><p className="mt-1 text-sm text-indigo-800">{session ? session.user.email : 'El inicio de sesión usa JWT temporal mantenido en memoria.'}</p></div><Status ready={apiAvailable}>{apiAvailable ? 'API respondió' : 'API aún no probada'}</Status></div>
+    <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
+      <Panel title="Funciones de la consola" description="Las pantallas permanecen visibles mientras se implementan sus rutas de administración.">
+        <div className="divide-y divide-slate-100">{[
+          ['Cuenta', 'Registro, JWT y consulta de identidad', 'account', 'Disponible'],
+          ['Dominios', 'Registro, TXT y verificación', 'domains', 'API pendiente'],
+          ['Reglas de caché', 'Wildcards, límites, TTL y reemplazo', 'rules', 'API pendiente'],
+          ['Accesos', 'API keys y usuarios por URL', 'access', 'API pendiente'],
+          ['Acceso a caché', 'Autenticación por recurso y entrega de sesión', 'cache-login', 'Contrato pendiente'],
+        ].map(([title, description, target, state]) => <button key={target} type="button" onClick={() => onNavigate(target as View)} className="flex w-full flex-wrap items-center justify-between gap-3 py-4 text-left first:pt-0 last:pb-0"><span><span className="block text-sm font-semibold text-slate-800">{title}</span><span className="mt-1 block text-xs text-slate-500">{description}</span></span><span className="text-xs font-semibold text-indigo-700">{state} · Abrir</span></button>)}</div>
+      </Panel>
+      <Panel title="Estado de los servicios" description="Implementación en el repositorio; el despliegue real depende de sus entornos.">
+        <div className="space-y-4"><IntegrationRow name="Node API: cuentas" state="Implementada" detail="POST /api/auth/register · POST /api/auth/login · GET /api/auth/me" /><IntegrationRow name="Node API: dominios y URLs" state="Pendiente" detail="Las rutas de administración están descritas como borrador en API.md." /><IntegrationRow name="Zonal Cache y DNS Interceptor" state="Rutas de servicio" detail="La caché consume configuración/credenciales y el interceptor consulta /api/records; no son operaciones de la UI." /><IntegrationRow name="Sesión UI a caché zonal" state="Pendiente" detail="El endpoint de login de recursos y el traspaso de sesión no están implementados en la Node API." /></div>
+      </Panel>
+    </div>
+  </>
+}
+
+function IntegrationRow({ name, state, detail }: { name: string; state: string; detail: string }) {
+  const ready = state === 'Implementada' || state === 'Rutas de servicio'
+  return <div className="flex items-start justify-between gap-3"><div><p className="text-sm font-semibold text-slate-800">{name}</p><p className="mt-1 text-xs leading-5 text-slate-500">{detail}</p></div><span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${ready ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900'}`}>{state}</span></div>
+}
+
+function AccountPage({ session, onAuthenticated, onApiResponded }: { session: Session | null; onAuthenticated: (session: Session) => void; onApiResponded: () => void }) {
+  const [registering, setRegistering] = useState(false)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<NoticeState | null>(null)
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setBusy(true)
+    setResult(null)
+    if (registering && new TextEncoder().encode(password).length > 72) {
+      setResult({ tone: 'error', text: 'La contraseña no puede superar 72 bytes.' })
+      setBusy(false)
+      return
+    }
+    try {
+      if (registering) {
+        const account = await api.register(email.trim(), password)
+        onApiResponded()
+        setRegistering(false)
+        setPassword('')
+        setResult({ tone: 'success', text: `La cuenta ${account.email} fue creada. Inicia sesión para continuar.` })
+      } else {
+        onAuthenticated(await api.login(email.trim(), password))
+        setPassword('')
+        setResult({ tone: 'success', text: 'La Node API confirmó la sesión.' })
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.status !== undefined) onApiResponded()
+      setResult({ tone: 'error', text: error instanceof Error ? error.message : 'No fue posible completar la solicitud.' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <div className="mx-auto max-w-3xl"><PageHeading eyebrow="Cuenta" title={session ? 'Cuenta activa' : registering ? 'Crear cuenta' : 'Iniciar sesión'} description="Las cuentas se almacenan en Firestore por medio de la Node API. La API devuelve un JWT de corta duración; el frontend lo mantiene solo en memoria." />
+    <Panel title={session ? 'Cuenta activa' : registering ? 'Registro de usuario' : 'Acceso a la cuenta'} description={session ? session.user.email : 'La contraseña se valida y almacena en el backend; nunca se guarda en el frontend.'}>
+      {session ? <p className="text-sm leading-6 text-slate-600">Tu sesión está activa en esta pestaña. Al recargar la página tendrás que iniciar sesión otra vez.</p> : <form className="grid gap-5" onSubmit={submit}>
+        <Notice value={result} />
+        <label className="grid gap-2 text-sm font-medium text-slate-800"><span>Correo electrónico</span><input className="control" type="email" autoComplete="email" required maxLength={254} value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+        <label className="grid gap-2 text-sm font-medium text-slate-800"><span>Contraseña</span><input className="control" type="password" autoComplete={registering ? 'new-password' : 'current-password'} required minLength={registering ? 8 : undefined} maxLength={registering ? 72 : undefined} value={password} onChange={(event) => setPassword(event.target.value)} />{registering && <span className="text-xs font-normal text-slate-500">Al menos 8 caracteres y hasta 72 bytes.</span>}</label>
+        <div className="flex flex-wrap items-center gap-3"><Button type="submit" disabled={busy}>{busy ? 'Enviando…' : registering ? 'Crear cuenta' : 'Iniciar sesión'}</Button><Button type="button" secondary disabled={busy} onClick={() => { setRegistering(!registering); setPassword(''); setResult(null) }}>{registering ? 'Ya tengo una cuenta' : 'Crear una cuenta'}</Button></div>
+      </form>}
+      <p className="mt-5 border-t border-slate-100 pt-4 text-xs leading-5 text-slate-500">Endpoints implementados: POST /api/auth/register, POST /api/auth/login y GET /api/auth/me. El cierre de sesión elimina el JWT localmente; el API no ofrece revocación.</p>
+    </Panel>
+  </div>
+}
+
+const pendingDetails: Record<Exclude<View, 'overview' | 'account'>, { eyebrow: string; title: string; description: string; capabilities: string[]; routes: string; note: string }> = {
+  domains: {
+    eyebrow: 'Propiedad y DNS', title: 'Dominios', description: 'La consola requiere la API de administración de dominios para crear, verificar y eliminar registros.',
+    capabilities: ['Registrar dominios y mostrar el reto TXT devuelto por el API.', 'Consultar la verificación DNS y listar el estado de cada dominio.', 'Eliminar un dominio junto con las reglas asociadas.'],
+    routes: 'Rutas propuestas: GET/POST /api/domains, POST /api/domains/:domain/verify y DELETE /api/domains/:domain.',
+    note: 'La Node API actual no registra estas rutas. No se envían solicitudes ni se muestran dominios de ejemplo.',
+  },
+  rules: {
+    eyebrow: 'URLs y políticas', title: 'Reglas de caché', description: 'La configuración de URLs se activará cuando la API de administración guarde y devuelva las reglas del propietario.',
+    capabilities: ['Patrones wildcard y origen por URL.', 'Tamaño de caché, tipos de archivo, TTL y política LRU/LFU/FIFO/MRU/Random.', 'Modo de autenticación por clave API o usuario y contraseña.'],
+    routes: 'Rutas propuestas: /api/domains/:domain/urls y /api/urls/:id.',
+    note: 'Estas rutas aparecen en API.md como borrador y aún no tienen implementación en el servidor.',
+  },
+  access: {
+    eyebrow: 'Usuarios y claves', title: 'Accesos por URL', description: 'La administración de credenciales para recursos protegidos requiere rutas de usuario y API keys que todavía no existen.',
+    capabilities: ['Crear y revocar API keys; la clave secreta debe mostrarse una sola vez.', 'Crear, actualizar y eliminar usuarios por URL.', 'Consultar solo metadatos seguros de las credenciales existentes.'],
+    routes: 'Rutas propuestas: /api/urls/:id/api-keys y /api/urls/:id/users.',
+    note: 'No se incluye SERVICE_KEY en el navegador. Esa credencial es exclusiva de la comunicación entre servicios.',
+  },
+  'cache-login': {
+    eyebrow: 'Autenticación de recursos', title: 'Acceso a caché zonal', description: 'El inicio de sesión de una URL protegida es distinto del inicio de sesión de la cuenta de administración.',
+    capabilities: ['Autenticar usuario y contraseña para una URL protegida.', 'Entregar una sesión a la caché y permitir verificarla o cerrarla.', 'Mantener la sesión dentro del protocolo que acuerden API y caché.'],
+    routes: 'API.md propone POST /api/service/login y /api/service/verify-session, pero la Node API no las implementa.',
+    note: 'La caché ya verifica credenciales de servicio a servicio. El formulario y el traspaso de sesión desde la UI siguen pendientes.',
+  },
+}
+
+function PendingPage({ kind }: { kind: Exclude<View, 'overview' | 'account'> }) {
+  const item = pendingDetails[kind]
+  return <><PageHeading eyebrow={item.eyebrow} title={item.title} description={item.description} /><div className="mb-5"><Status>Integración pendiente</Status></div><div className="grid gap-5 xl:grid-cols-2"><Panel title="Funciones previstas"><ul className="list-disc space-y-3 pl-5 text-sm leading-6 text-slate-600">{item.capabilities.map((capability) => <li key={capability}>{capability}</li>)}</ul></Panel><Panel title="Dependencia de API"><p className="text-sm leading-6 text-slate-700">{item.routes}</p><p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">{item.note}</p></Panel></div></>
 }

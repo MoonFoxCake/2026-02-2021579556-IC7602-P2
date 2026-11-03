@@ -94,6 +94,25 @@ zc_index_put(ix_del_dominio, key, bytes, ft->ttl, ft->policy, now, borrar_archiv
 Paso a paso de cada requisito del enunciado (R1–R9) con los comandos y la salida esperada:
 [`COMO-CORRER.md`, sección 3](COMO-CORRER.md#3-correr-a-mano-y-probar-cada-requisito-del-enunciado).
 
+## Verificación para la entrega (requisito → código → prueba)
+
+Revisión del 2 de noviembre de 2026. Se ejecuta todo con `cd api-nodejs && npm install && npm test` (47 ok) y
+`cd ZonalCache && make && make check` (342 unitarias + 29 + 49 + 16 + 11 e2e, 0 fallos).
+
+| Requisito (Persona 3) | Código | Pruebas que lo demuestran |
+|---|---|---|
+| LRU, LFU, FIFO, MRU, Random | `p3/zc_policy.c` | `test_policy` (166); `make e2e-proxy`: "LRU expulsa el menos reciente", "LFU expulsa el menos usado", "FIFO expulsa el primero que entró", "MRU expulsa el más reciente", "RANDOM: el dominio no pasa de 250 B" |
+| Metadatos para las políticas (secuencia de inserción y acceso, hits, expiración, tamaño, grupo) y su persistencia | `p3/zc_policy.h` (`zc_entry_t`), `p3/zc_registry.c` (`index.zc`) | `test_policy`, `test_registry`; `make e2e`: "índice guardado al apagar", "tras reinicio = HIT"; `make e2e-proxy`: "índices guardados al apagar (SIGTERM)" |
+| Tamaño máximo por dominio / por URL | `zc_index_put_ex`, `zc_registry_get` | `make e2e`: "dominio no supera maxCacheBytes", "archivos expulsados se borran"; `make e2e-proxy`: "objeto mayor que el dominio no se guarda" |
+| `x-api-key` | `p3/zc_auth.c` (SHA-256, tiempo constante) | `test_auth`; `make e2e`: "api sin key = 401", "api key mala = 401", "api key buena = 200"; `make e2e-api`: "api key de Firestore (hash MAYÚSCULAS) = 200"; `make e2e-proxy`: "x-api-key NO se reenvía al origen" |
+| Usuario/contraseña (llamado al API/UI) | `p3/zc_auth.c`, `p3/zc_gate.c` (`/__zc/login`, `/__zc/callback`) | `make e2e`: "login contraseña mala = 401", "login correcto = 302 + cookie", "login sin CSRF = 403", "rate limit login = 429", modo UI: "UI devuelve ticket al callback", "ticket reutilizado = 401", "UI rechaza callback de otro dominio"; `make e2e-api`: "login con contraseña mala (bcrypt) = 401", "login correcto verificado por el API = 302" |
+| Sesión en peticiones posteriores y cerrar sesión | `p3/zc_auth.c` (cookie `zc_session`), `/__zc/logout` | `make e2e`: "con sesión = 200 MISS, private", "con sesión 2a vez = HIT", "logout = 302 y borra cookie", "tras logout = 302 a login"; `make e2e-proxy`: "zc_session/zc_csrf NO llegan al origen" |
+| SSL termination | `p3/zc_tls.c` (TLS ≥ 1.2, SNI) | `test_tls`; `make e2e`: "HTTPS (SSL termination) = 200", "HTTPS negocia TLS >= 1.2"; `make e2e-proxy`: "cliente por HTTPS (SSL termination)" |
+| Lectura de configuración desde Firebase (vía API Node.js) con refresco | `p3/zc_config.c` | `test_config`, `test_runtime`; `make e2e-api`: "API: /api/cache/config sin credencial = 401", "la caché cargó la config del API real", "dominio sin verificar (pendiente.com) = 404", "política del tipo html = LRU (Firestore)"; `make e2e-proxy`: "/__zc/healthz responde zona y dominios" |
+| Módulos separados de la Persona 2 | Biblioteca `p3/` → `libzc_p3.a`; único punto de unión `p3/zc_gate.h` | El servidor `src/zonal_cache.c` y el demo `tools/zc_p3_demo.c` usan la misma biblioteca sin modificarla (`make e2e` y `make e2e-demo`: 29/29 cada uno) |
+
+Pasos manuales con salida esperada: [`COMO-CORRER.md`, sección 3](COMO-CORRER.md#3-correr-a-mano-y-probar-cada-requisito-del-enunciado).
+
 ## Estado
 
 | Aspecto | Estado |

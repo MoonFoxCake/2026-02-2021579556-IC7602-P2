@@ -3,13 +3,12 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
 const express = require('express');
-const { createDnsRouter, countryOf, parseRanges } = require('../src/dns-routes');
+const { createDnsRouter } = require('../src/dns-routes');
 const { buildCacheConfig } = require('../src/cache-routes');
 
 const ENV = {
   ZONE_CACHES: 'cr=10.0.0.11,us=10.0.0.12',
   COUNTRY_ZONES: 'CR=cr,PA=cr,NI=cr,*=us',
-  IP_COUNTRY_RANGES: '192.168.49.0/24=CR,172.16.0.0/12=US,192.168.49.7/32=US',
   DNS_RECORD_TTL: '30',
 };
 const DOMAINS = {
@@ -20,22 +19,13 @@ const DOMAINS = {
 };
 const store = { getDomain: async (d) => DOMAINS[d] || null };
 
-async function withServer(env, fn) {
+async function withServer(env, fn, lookupCountry = async (ip) => ({ '192.168.49.20': 'CR', '172.20.0.5': 'US' })[ip] || null) {
   const app = express();
-  app.use('/api', createDnsRouter({ store, env }));
+  app.use('/api', createDnsRouter({ store, env, lookupCountry }));
   const srv = http.createServer(app);
   await new Promise((r) => srv.listen(0, '127.0.0.1', r));
   try { await fn(`http://127.0.0.1:${srv.address().port}/api/records`); } finally { srv.close(); }
 }
-
-test('IP -> país con CIDR (gana el prefijo más largo)', () => {
-  const r = parseRanges(ENV.IP_COUNTRY_RANGES);
-  assert.equal(countryOf('192.168.49.20', r), 'CR');
-  assert.equal(countryOf('192.168.49.7', r), 'US');
-  assert.equal(countryOf('::ffff:172.20.1.1', r), 'US');
-  assert.equal(countryOf('8.8.8.8', r), null);
-  assert.equal(countryOf('basura', r), null);
-});
 
 test('dominio verificado: record geo con las cachés zonales y la zona del cliente', async () => {
   await withServer(ENV, async (base) => {
@@ -50,7 +40,8 @@ test('dominio verificado: record geo con las cachés zonales y la zona del clien
     const otro = await (await fetch(`${base}/ejemplo.com?sourceIp=8.8.8.8`)).json();
     assert.equal(otro.client.countryCode, 'US');            // país desconocido -> zona "*"
     const forzado = await (await fetch(`${base}/ejemplo.com?country=pa`)).json();
-    assert.equal(forzado.client.countryCode, 'CR');          // PA -> cr
+    assert.equal(forzado.client.country, null);              // query string cannot override the database
+    assert.equal(forzado.client.countryCode, 'US');
   });
 });
 
@@ -69,6 +60,12 @@ test('sin ZONE_CACHES el endpoint falla con 503 (no inventa IPs)', async () => {
   await withServer({}, async (base) => {
     assert.equal((await fetch(`${base}/ejemplo.com`)).status, 503);
   });
+});
+
+test('database failures are 503, not a fabricated default country', async () => {
+  await withServer(ENV, async (base) => {
+    assert.equal((await fetch(`${base}/ejemplo.com?sourceIp=8.8.8.8`)).status, 503);
+  }, async () => { throw new Error('unavailable'); });
 });
 
 test('config de caché filtrada por zona solo si el dominio define "zones"', () => {

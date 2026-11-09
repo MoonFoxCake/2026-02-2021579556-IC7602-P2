@@ -103,7 +103,9 @@ int main(void) {
     char url[2048];
     CHECK(zc_auth_ui_login_url(u, "x.com:8443", "/priv/*", 1, "/priv/a b.png?x=1", url, sizeof url) == 0);
     CHECK(!strcmp(url, "https://ui.example/cache-login?domain=x.com&pattern=%2Fpriv%2F%2A&callback=https%3A%2F%2Fx.com%3A8443%2F__zc%2Fcallback&return_to=%2Fpriv%2Fa%20b.png%3Fx%3D1"));
-    CHECK(zc_auth_ui_login_url(u, "x.com", "/p", 0, "//evil.com", url, sizeof url) == 0 && strstr(url, "return_to=%2F") && !strstr(url, "evil"));
+    CHECK(zc_auth_ui_login_url(u, "x.com", "/p", 0, "//evil.com", url, sizeof url) == 0 && !strcmp(url, "https://x.com/"));
+    CHECK(zc_auth_ui_login_url(u, "X.com:80", "/priv/*", 0, "/priv/a?x=1", url, sizeof url) == 0 && !strcmp(url, "https://x.com/priv/a?x=1"));
+    CHECK(zc_auth_ui_login_url(u, "x.com", "/p", 0, "/p", url, 5) == -1);
 
     char tk[4096], st[80];
     CHECK(zc_ticket_make(SECRET, "x.com", "/priv/*", "kevin", 5100, tk, sizeof tk) == 0);

@@ -382,6 +382,10 @@ int zc_auth_ui_login_url(const zc_auth_t *a, const char *host, const char *patte
     char hn[256], safe[1024], cb[600], e_h[800], e_p[800], e_cb[1800], e_rt[3100];
     host_norm(host, hn, sizeof(hn));
     zc_safe_return_path(return_to, safe, sizeof(safe));
+    if (!is_tls && a->o.cookie_secure) {
+        int n = snprintf(out, cap, "https://%s%s", hn, safe);
+        return (n > 0 && (size_t)n < cap) ? 0 : -1;
+    }
     snprintf(cb, sizeof(cb), "%s://%s" ZC_CALLBACK_PATH, is_tls ? "https" : "http", host ? host : hn);
     zc_url_encode(hn, e_h, sizeof(e_h)); zc_url_encode(pattern ? pattern : "", e_p, sizeof(e_p));
     zc_url_encode(cb, e_cb, sizeof(e_cb)); zc_url_encode(safe, e_rt, sizeof(e_rt));

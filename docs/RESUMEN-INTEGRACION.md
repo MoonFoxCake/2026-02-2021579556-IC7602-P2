@@ -1,5 +1,7 @@
 # Proyecto 2 (IC7602) — Estado del sistema y plan de integración
 
+> Plan histórico del 1 de noviembre. Para el estado desplegado del 9 de noviembre, consultar [WSL-DEPLOYMENT.md](WSL-DEPLOYMENT.md) y [GEO-LOGIN.md](GEO-LOGIN.md); varias filas de pendientes de este plan ya están resueltas.
+
 Estado revisado: **1 de noviembre de 2026** (integración de la Zonal Cache con el resto del sistema) · Entrega indicada: **martes 3 de noviembre** (antes de medianoche) ·
 Evaluación presencial indicada: martes 10 de noviembre.
 
@@ -175,7 +177,7 @@ recibe o una respuesta lista (401/302/404/login) o `ZC_GATE_PROXY` con origen, c
 |---|---|---|
 | `ZONE_CACHES` | `cr=10.0.0.11,us=10.0.0.12` | Zona → EXTERNAL-IP del Service de su caché |
 | `COUNTRY_ZONES` | `CR=cr,PA=cr,NI=cr,*=us` | País → zona (`*` = por defecto) |
-| `IP_COUNTRY_RANGES` | `192.168.49.0/24=CR,10.0.0.0/8=US` | Tabla IP → país (CIDR) |
+| `FIREBASE_DATABASE_URL` | URL RTDB del proyecto | `/ipToCountry`: DB-IP Lite con esquema e índice del P1 |
 
 Dominio no registrado o sin verificar → `404` → el interceptor reenvía al resolver (como antes). Lo comprueba
 `make e2e-sistema` con `dig` contra el `dns.c` real. En `dns.c` solo se corrigió el orden de bytes de la IP.
@@ -183,8 +185,7 @@ Dominio no registrado o sin verificar → `404` → el interceptor reenvía al r
 Pendiente de la Persona 1:
 1. Helm (Service UDP 53) para el interceptor; ya existe `Interceptor/dockerfile`.
 2. Quitar el default `http://localhost:8080` de `DNS_API_URL` (el enunciado prohíbe valores quemados).
-3. Si se quiere la base IP-to-Country del P1 en lugar de `IP_COUNTRY_RANGES`, conectarla en `countryOf()` de
-   `dns-routes.js` (es una sola función).
+3. IP-to-Country integrado: `src/ip-country.js` usa la consulta del P1 sobre DB-IP Lite en RTDB. Véase [GEO-LOGIN.md](GEO-LOGIN.md).
 
 > **Ojo:** un registro A no lleva puerto. El cliente se conectará al **80/443** de la IP que devuelva el
 > interceptor, así que cada zona necesita **su propia IP con 80/443** (Service `LoadBalancer` con
@@ -212,7 +213,7 @@ Pendiente de la Persona 1:
 |---|---|---|
 | 1 | Chart de Helm del interceptor (la selección de zona ya funciona vía `/api/records`, §4.4) | `make e2e-sistema` (corre `dns.c` real con `dig`) |
 | 2 | ~~Servidor HTTP con `zc_gate` + proxy real + disco~~ **Hecho** (`src/zonal_cache.c`) | `make check` |
-| 4 | Desplegar en Vercel con `SERVICE_KEY`, `ZONE_CACHES`, `COUNTRY_ZONES`, `IP_COUNTRY_RANGES`; probar con Firestore real | `npm test`; `make e2e-api` y `make e2e-sistema` usan almacén simulado |
+| 4 | Vercel: `SERVICE_KEY`, `ZONE_CACHES`, `COUNTRY_ZONES`, `FIREBASE_DATABASE_URL`, `TICKET_SECRET`; Firestore para cuentas y reglas, RTDB para países | `npm test`; `npm run test:k8s-handoff` contra el despliegue real |
 | 5 | UI (registro, dominios TXT, URLs con wildcards, tipos/TTL/política, usuarios, keys, `/cache-login`, logout) + REST Java + Apache con charts | Apache/Java: `curl` directo; UI: contra el API de la Persona 4 |
 | 3 (yo) | Biblioteca + servidor real + imagen + chart + script de despliegue; falta validar en el clúster con el API en Vercel | `make check` |
 

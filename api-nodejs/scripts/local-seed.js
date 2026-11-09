@@ -25,6 +25,9 @@ async function seed() {
   }
   const ownerId = userIdFor(email);
   const createdAt = new Date().toISOString();
+  for (const row of require('./import-ip-country').readRanges(require('./ip-country-p1-fixture.json'))) {
+    await createIfMissing('ipToCountry', `ip-${String(row.ipFrom).padStart(10, '0')}`, row);
+  }
   await createIfMissing('users', ownerId, {
     email, passwordHash: await bcrypt.hash(password, 10), createdAt,
   });

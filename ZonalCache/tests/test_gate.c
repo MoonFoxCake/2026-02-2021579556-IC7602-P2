@@ -125,6 +125,9 @@ int main(void) {
     CHECK(zc_gate_init_with(&ou, NULL, err, sizeof err) == -1);                  /* falta el secreto */
     ou.ticket_secret = SECRET; ou.ticket_max_age = 120; ou.cookie_secure = 1;
     CHECK(zc_gate_init_with(&ou, NULL, err, sizeof err) == 0);
+    r = R("GET", "/privado/a.txt?x=1"); zc_gate_handle(&r, now, &g);
+    CHECK(g.status == 302 && has(&g, "Location: https://ejemplo.com/privado/a.txt?x=1\r\n") && has(&g, "Cache-Control: no-store") && has(&g, "Referrer-Policy: no-referrer"));
+    zc_gate_done(&g);
     r = R("GET", "/privado/a.txt"); r.is_tls = 1; zc_gate_handle(&r, now, &g);
     CHECK(g.status == 302 && has(&g, "Location: https://ui.test/cache-login?domain=ejemplo.com&pattern=%2Fprivado%2F%2A&callback=https%3A%2F%2FEjemplo.com%3A8080%2F__zc%2Fcallback&return_to=%2Fprivado%2Fa.txt"));
     zc_gate_done(&g);

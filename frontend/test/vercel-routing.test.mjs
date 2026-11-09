@@ -7,7 +7,7 @@ const fallback = config.rewrites.find((rule) => rule.destination === '/index.htm
 const matchesFallback = new RegExp(`^${fallback.source}$`)
 
 test('SPA routes still receive index.html', () => {
-  for (const path of ['/', '/account', '/domains/example.com']) assert.ok(matchesFallback.test(path), path)
+  for (const path of ['/', '/account', '/domains/example.com', '/cache-login']) assert.ok(matchesFallback.test(path), path)
 })
 
 test('API and Vercel telemetry paths never receive HTML from the SPA fallback', () => {

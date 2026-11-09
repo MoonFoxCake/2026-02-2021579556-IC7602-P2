@@ -1,0 +1,44 @@
+map_hash_bucket_size 128;
+upstream cr_cache { server zc-cr.__NAMESPACE__.svc.cluster.local:443; keepalive 4; }
+upstream us_cache { server zc-us.__NAMESPACE__.svc.cluster.local:443; keepalive 4; }
+map $host $cache_backend {
+    default "";
+    redes-panel-cr.__BASE_DOMAIN__ cr_cache;
+    redes-panel-us.__BASE_DOMAIN__ us_cache;
+}
+map $http_x_p2_cache_key $cache_authorized {
+    default 0;
+    "__TUNNEL_KEY__" 1;
+}
+map $http_x_p2_cache_host $resource_host {
+    default "";
+    "~^[a-z0-9][a-z0-9.-]{0,252}$" $http_x_p2_cache_host;
+}
+server {
+    listen 8080;
+    access_log off;
+    server_tokens off;
+    client_max_body_size 10m;
+    location = /healthz { return 200 "ok\n"; }
+    location / {
+        if ($cache_authorized = 0) { return 403; }
+        if ($cache_backend = "") { return 404; }
+        if ($resource_host = "") { return 400; }
+        proxy_pass https://$cache_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $resource_host;
+        proxy_set_header X-P2-Cache-Key "";
+        proxy_set_header X-P2-Cache-Host "";
+        proxy_set_header Authorization "";
+        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /etc/cache-ca/tls.crt;
+        proxy_ssl_server_name on;
+        proxy_ssl_name __ORIGIN_SERVER_NAME__;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 30s;
+        proxy_cache off;
+        proxy_hide_header Cache-Control;
+        add_header Cache-Control "no-store" always;
+    }
+}

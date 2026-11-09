@@ -1,0 +1,8 @@
+tunnelId: ""
+baseDomain: ""
+originServerName: ""
+tunnelSecret: public-cache-tunnel
+gatewaySecret: public-cache-gateway
+cacheTlsSecret: zc-tls
+cloudflaredImage: cloudflare/cloudflared:2026.10.7
+nginxImage: nginxinc/nginx-unprivileged:1.28-alpine

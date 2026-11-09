@@ -9,5 +9,7 @@ api:
 service:
   type: LoadBalancer
   port: 53
+  # Country lookup needs the original UDP client address, not a node SNAT address.
+  externalTrafficPolicy: Local
 
 resources: {}

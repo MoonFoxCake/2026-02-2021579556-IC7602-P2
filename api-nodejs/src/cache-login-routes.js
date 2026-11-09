@@ -6,6 +6,12 @@ const { verifyCredentials } = require('./cache-routes');
 const { findVerifiedDomain } = require('./dns-routes');
 const { createLoginLimiter } = require('./auth-routes');
 
+function createCacheTicket({ domain, pattern, user }, secret) {
+  const payload = Buffer.from(JSON.stringify({ domain, pattern, user,
+    exp: Math.floor(Date.now() / 1000) + 60, nonce: crypto.randomBytes(32).toString('hex') })).toString('base64url');
+  return `${payload}.${crypto.createHmac('sha256', secret).update(payload).digest('hex')}`;
+}
+
 function loginContext(body, env) {
   const { domain, pattern, callback, returnTo } = body;
   if (typeof domain !== 'string' || domain.length > 253
@@ -53,9 +59,7 @@ function createCacheLoginRouter({ store, env = process.env, compare = require('b
       }
       limiter.reset(key);
       // Matches ZonalCache/p3/zc_auth.c: base64url JSON + hex HMAC-SHA256.
-      const payload = Buffer.from(JSON.stringify({ domain: context.domain, pattern: context.pattern,
-        user: username, exp: Math.floor(Date.now() / 1000) + 60, nonce: crypto.randomBytes(32).toString('hex') })).toString('base64url');
-      const ticket = `${payload}.${crypto.createHmac('sha256', env.TICKET_SECRET).update(payload).digest('hex')}`;
+      const ticket = createCacheTicket({ domain: context.domain, pattern: context.pattern, user: username }, env.TICKET_SECRET);
       context.callback.searchParams.set('ticket', ticket);
       context.callback.searchParams.set('return_to', context.returnTo);
       // shortcut: C accepts at most 2000 target bytes; use a shorter return query until that transport limit changes.
@@ -66,4 +70,4 @@ function createCacheLoginRouter({ store, env = process.env, compare = require('b
   return router;
 }
 
-module.exports = { createCacheLoginRouter, loginContext };
+module.exports = { createCacheLoginRouter, loginContext, createCacheTicket };

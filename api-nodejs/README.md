@@ -26,15 +26,15 @@ La guía de servicios y despliegue Minikube está en [docs/KUBERNETES.md](../doc
 
 ## Panel de pruebas de caché
 
-`CACHE_TEST_URL` configura un destino fijo HTTP/HTTPS, sin ruta ni credenciales, alcanzable desde este API. Compose usa `http://zonal-cache:8080`. Sin esa variable el panel indica que no hay caché disponible. La caché debe usar `ZC_LOGIN_MODE=local`. `CACHE_TEST_COOKIE_SECURE=0` permite HTTP local; por defecto la cookie es Secure y SameSite=None para HTTPS. CORS debe permitir expresamente el origen de la UI y credenciales; navegadores que bloquean cookies de terceros deben usar UI/API bajo el mismo origen.
+`CACHE_TEST_URLS` es un objeto JSON de zona → destino fijo HTTP/HTTPS alcanzable desde este API, sin ruta ni credenciales. `CACHE_TEST_URL` conserva la alternativa de una zona para Compose (`http://zonal-cache:8080`). Sin destinos configurados el panel indica que no hay caché disponible. `CACHE_TEST_LOGIN_MODE=ui` verifica credenciales y usa el ticket firmado; el modo local usa el formulario CSRF nativo. En HTTPS las cookies son Secure/HttpOnly/SameSite=Lax; `CACHE_TEST_COOKIE_SECURE=0` permite HTTP local con SameSite=Strict. Producción usa el proxy del mismo origen de la UI y `CACHE_TEST_TUNNEL_KEY` solo en backend: [PUBLIC-CACHE.md](../docs/PUBLIC-CACHE.md).
 
 Todas las rutas `/api/cache-test/*` requieren JWT de administración y devuelven `Cache-Control: no-store`:
 
 | Método y ruta | Entrada / salida |
 |---|---|
-| GET `/status` | `{ enabled }` |
-| POST `/request` | `{ urlId, host, path, apiKey? }` → `{ status, headers, body, truncated, elapsedMs, requiresLogin }` |
-| POST `/login` | `{ urlId, host, path, username, password }` → `{ authenticated, status, message }`, cookie HttpOnly de sesión |
-| POST `/logout` | `{ urlId, host, path }` → revoca la sesión en la caché y borra la cookie |
+| GET `/status` | `{ enabled, zones }` |
+| POST `/request` | `{ urlId, host, path, zone?, apiKey? }` → `{ status, headers, body, truncated, elapsedMs, requiresLogin }` |
+| POST `/login` | `{ urlId, host, path, zone?, username, password }` → `{ authenticated, status, message }`, cookie HttpOnly de sesión |
+| POST `/logout` | `{ urlId, host, path, zone? }` → revoca la sesión de esa zona y borra su cookie |
 
-Se verifica propiedad de la regla y del dominio verificado. Solo se aceptan hosts del dominio y rutas locales no reservadas; se rechazan URLs absolutas, traversal y saltos de línea. El destino nunca viene del cliente. Los GET no siguen redirecciones y devuelven como datos los estados del recurso (incluido 401/302), para no confundirlos con la sesión de administración. Solo se exponen encabezados de contenido/caché, hasta 64 KiB de cuerpo y ninguna credencial. El JWT no se reenvía a la caché. El login reutiliza CSRF/sesiones de GNU C y no introduce un protocolo nuevo de tickets.
+Se verifica propiedad de la regla y del dominio verificado. Solo se aceptan hosts del dominio y rutas locales no reservadas; se rechazan URLs absolutas, traversal y saltos de línea. El destino nunca viene del cliente. Los GET no siguen redirecciones y devuelven como datos los estados del recurso (incluido 401/302), para no confundirlos con la sesión de administración. Solo se exponen encabezados de contenido/caché y hasta 64 KiB de cuerpo; no se devuelven credenciales. El JWT no se reenvía a la caché. El ticket del modo UI es el mismo protocolo que acepta el callback de GNU C. La sesión del panel se aísla por cuenta/regla/zona.

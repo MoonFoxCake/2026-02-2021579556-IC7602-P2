@@ -5,6 +5,9 @@ metadata:
   labels: {{- include "dns.labels" . | nindent 4 }}
 spec:
   type: {{ .Values.service.type }}
+  {{- if or (eq .Values.service.type "LoadBalancer") (eq .Values.service.type "NodePort") }}
+  externalTrafficPolicy: {{ .Values.service.externalTrafficPolicy }}
+  {{- end }}
   selector: {{- include "dns.labels" . | nindent 4 }}
   ports:
     - name: dns

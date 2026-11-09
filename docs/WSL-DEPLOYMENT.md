@@ -4,7 +4,7 @@
 
 Se desplegaron DNS Interceptor, cachés CR/US, Java REST API y Apache en Minikube dentro de Ubuntu-24.04. Las cachés consultan el API de producción `https://proyecto-redes-2-api.vercel.app`, que accede a Firestore `p2-redes-b7bab`.
 
-Es un despliegue local: las direcciones siguientes son accesibles desde Ubuntu WSL, no desde Internet. No se configuró `CACHE_TEST_URL` con una IP privada porque Vercel no podría alcanzarla. No se validó TXT público: el equipo no dispone de un dominio ni de un endpoint público. Ambas cachés usan ahora `ZC_LOGIN_MODE=ui`; el handoff externo y DB-IP están implementados y verificados según [GEO-LOGIN.md](GEO-LOGIN.md).
+Las direcciones siguientes siguen siendo privadas de Ubuntu WSL. Se añadió Cloudflare Tunnel para publicar HTTP/HTTPS de ambas cachés y un gateway autenticado para que Vercel pueda consultar el panel **Acceso a caché**. Se verificaron mediante TXT público `redes-cr.centrodecapacitaciongyg.com` y `redes-us.centrodecapacitaciongyg.com`. Configuración y pruebas actuales: [PUBLIC-CACHE.md](PUBLIC-CACHE.md). Ambas cachés usan `ZC_LOGIN_MODE=ui`; el handoff externo y DB-IP están documentados en [GEO-LOGIN.md](GEO-LOGIN.md).
 
 | Servicio | Dirección observada | Puerto |
 |---|---|---|
@@ -101,9 +101,11 @@ FIREBASE_DATABASE_URL=https://p2-redes-b7bab-default-rtdb.firebaseio.com
 
 El API usa DB-IP Lite 2026-11: 362,998 rangos IPv4 en `/ipToCountry` de RTDB, con esquema e índice del P1. Las IP privadas aparecen como desconocidas y usan `*=cr`; ya no se simula su país mediante variables CIDR.
 
-Despliegues actuales Ready: API `dpl_71LQT9jBydw7FwhGweZcrBrEA1VP`, UI `dpl_Fk3Bc1yZjJHPFaqv4md1Q18pF1nm`. Las cachés usan `zonal-cache:handoff-20261109-https`; Apache usa `apache-web:geo-20261109`. Se mantuvieron las dos correcciones autorizadas de `prueba-natalia.test`, de `http://rest-api:8080` a `http://rest-api-java.default.svc.cluster.local:8080`. No se modificó la propiedad ni la verificación de dominios existentes.
+Despliegues del panel: API `dpl_5YmgvbLCfVG2dgKCgEFg2fmSSg3o`, UI `dpl_A9gvAAZ3Q2HjDLUKAaXG1TbYU5sQ`. Las cachés usan `zonal-cache:handoff-20261109-https`; Apache usa `apache-web:geo-20261109`. Se mantuvieron las dos correcciones autorizadas de `prueba-natalia.test`, de `http://rest-api:8080` a `http://rest-api-java.default.svc.cluster.local:8080`. No se modificó la propiedad ni la verificación de dominios existentes.
 
-## Pruebas realizadas
+El Service DNS ahora usa `externalTrafficPolicy: Local`. Se verificó IP original y selección CR/US con paquetes UDP reales, namespaces de cliente aislados y la base DB-IP de producción. Se repararon los fixtures, pasó `make check` completo y se validó un sitio externo HTTP sin redirección a HTTPS. Comandos y resultados: [TECHNICAL-VALIDATION.md](TECHNICAL-VALIDATION.md).
+
+## Pruebas iniciales de la red privada
 
 Pasaron 18 comprobaciones:
 
@@ -138,7 +140,7 @@ curl -fsS https://proyecto-redes-2-api.vercel.app/api/health/db
 dig @192.168.49.242 geo.test +short
 ```
 
-Para repetir MISS/HIT y CRUD se necesitan reglas y credenciales válidas de un dominio autorizado. No reutilice credenciales temporales eliminadas. La ampliación de esta sesión verificó login externo en el navegador, tickets alterados/repetidos/expirados, cookie segura, MISS/HIT y logout mediante Vercel–Firestore–Kubernetes; véase [GEO-LOGIN.md](GEO-LOGIN.md). También se contrastaron 14 límites de países con el CSV DB-IP y cuatro direcciones desconocidas/inválidas, y el API resolvió US→US, CR→CR e IP privada→zona por defecto. Las pruebas de reemplazo bajo presión, sitios externos HTTP/HTTPS y TXT público no se repitieron.
+Para repetir MISS/HIT y CRUD se necesitan reglas y credenciales válidas de un dominio autorizado. No reutilice credenciales temporales eliminadas. La ampliación verificó login externo en el navegador, tickets alterados/repetidos/expirados, cookie segura, MISS/HIT y logout mediante Vercel–Firestore–Kubernetes; véase [GEO-LOGIN.md](GEO-LOGIN.md). También se contrastaron 14 límites de países con el CSV DB-IP y cuatro direcciones desconocidas/inválidas, y el API resolvió US→US, CR→CR e IP privada→zona por defecto. Las pruebas públicas posteriores incluyen TXT y un origen HTTPS externo; véase [PUBLIC-CACHE.md](PUBLIC-CACHE.md). El reemplazo bajo presión no se repitió en esta sesión.
 
 En la comprobación final apareció una regla adicional de `google.com` con origen `http://apache80`, ajena a las reglas temporales de esta prueba. No se modificó. Ese nombre de Service no existe en este cluster; el origen Apache configurado es `http://apache-web.default.svc.cluster.local`. `google.com` no figuraba entre los dominios verificados, por lo que la caché no cargaba esa regla.
 

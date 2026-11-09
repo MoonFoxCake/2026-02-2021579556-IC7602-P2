@@ -17,8 +17,13 @@ async function ready(url) {
 }
 
 async function dnsCheck() {
+  const record = await request('http://dns-api:8080/api/records/multi.test');
+  assert.equal(record.status, 200);
+  const { targets } = await record.json();
+  const addresses = targets.filter((target) => target.healthy).map((target) => target.address);
+  assert.ok(addresses.length > 0, 'multi.test needs a healthy target in Firebase');
   const socket = dgram.createSocket('udp4');
-  const query = Buffer.from('12340100000100000000000002703204746573740000010001', 'hex');
+  const query = Buffer.from('123401000001000000000000056d756c746904746573740000010001', 'hex');
   await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('DNS response timeout')), 8000);
     socket.once('error', reject);
@@ -27,7 +32,7 @@ async function dnsCheck() {
         assert.equal(response.readUInt16BE(0), 0x1234);
         assert.equal(response[3] & 15, 0);
         assert.ok(response.readUInt16BE(6) >= 1);
-        assert.equal([...response.subarray(-4)].join('.'), '127.0.0.1');
+        assert.ok(addresses.includes([...response.subarray(-4)].join('.')));
         resolve();
       } catch (error) { reject(error); }
     });
@@ -39,7 +44,7 @@ async function dnsCheck() {
 async function smoke() {
   await Promise.all([
     ready('http://frontend:8080/'), ready('http://rest-api-java:8080/api/health'),
-    ready('http://zonal-cache:8080/__zc/healthz'),
+    ready('http://zonal-cache:8080/__zc/healthz'), ready('http://dns-api:8080/health'),
   ]);
   const ui = await request('http://frontend:8080/');
   assert.match(await ui.text(), /<div id="root"><\/div>/);
@@ -88,7 +93,7 @@ async function smoke() {
   }
   console.log('PASS: Java CRUD through cache, cache MISS/HIT and Apache origin');
   await dnsCheck();
-  console.log('PASS: Interceptor UDP DNS returns 127.0.0.1 for p2.test');
+  console.log('PASS: Interceptor UDP DNS resolves multi.test through DNS API and Firebase');
   await require('./cache-test-smoke')(request);
 }
 

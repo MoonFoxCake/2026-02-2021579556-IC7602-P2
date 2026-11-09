@@ -6,7 +6,26 @@ Requisito: Docker Desktop iniciado en modo contenedores Linux, con Docker Compos
 docker compose up --build -d --wait
 ```
 
-La primera construcción necesita Internet para imágenes y paquetes. Una vez construidas, las cuentas, configuración, caché y orígenes de demostración usan servicios locales. No se necesita iniciar sesión en Firebase/Vercel, instalar Node/Java/Helm ni crear un archivo `.env`.
+La primera construcción necesita Internet para imágenes y paquetes. Compose inicia todos los servicios, incluido el DNS API importado del P1 en `dns-api/`. Las cuentas, configuración de caché y orígenes del P2 usan servicios locales; el DNS API consulta Firebase Realtime Database real y el DNS remoto.
+
+## DNS API integrado
+
+Antes de iniciar Compose, coloque la cuenta de servicio en `secrets/firebase-service-account.json` (ya preparada en este equipo). La carpeta está excluida de Git. En otro equipo debe copiar la clave por separado. Puede cambiar la ruta mediante `DNS_FIREBASE_CREDENTIALS` y la base mediante `DNS_DATABASE_URL` en el `.env` de la raíz; vea [.env.example](../.env.example).
+
+Compose monta la clave de solo lectura en `/run/secrets/dns-firebase`. No se copia al código ni a la imagen. El interceptor consulta `http://dns-api:8080` por la red interna y espera el healthcheck del API. No requiere el proceso Java del P1 ni acceso al puerto 8080 del host, ni la regla UFW que se usaba para esa conexión.
+
+```bash
+docker compose up --build -d --wait
+curl http://127.0.0.1:18083/health
+curl http://127.0.0.1:18083/api/records/multi.test
+dig @127.0.0.1 -p 1053 multi.test A
+dig @127.0.0.1 -p 1053 geo.test A
+dig @127.0.0.1 -p 1053 google.com A
+```
+
+La base configurada por defecto es `p2-redes-b7bab`, a la que pertenece la credencial. Los registros DNS provienen de esa base. Crear `p2.test` en el emulador del P2 no crea un registro en Realtime Database; para resolverlo hacia la caché local debe existir también allí con el destino adecuado. No se migran ni modifican datos de Firebase durante el arranque.
+
+El puerto publicado del DNS API es `18083` para evitar conflictos con procesos existentes en `8080`. `/health` comprueba el servidor HTTP; una consulta a `/api/records/multi.test` comprueba también el acceso a Firebase. Si devuelve 502, revise la cuenta de servicio y sus permisos sobre la base configurada.
 
 ## UI y datos de demostración
 
@@ -32,7 +51,7 @@ Las reglas iniciales son públicas (`authType=none`). Desde la UI se pueden crea
 
 Los GET pasan por el API hacia el destino fijo `CACHE_TEST_URL=http://zonal-cache:8080`, con el Host del dominio seleccionado. El API exige JWT y propiedad de la regla/dominio; no permite elegir un servidor arbitrario ni seguir redirects. Reutiliza el login CSRF nativo de la caché y guarda la sesión en una cookie HttpOnly aislada por cuenta/regla. No devuelve cookies del origen, contraseñas ni tokens en los resultados; limita la vista del cuerpo a 64 KiB y lo muestra sin ejecutar HTML. Las API keys solo se mantienen en memoria durante esta vista.
 
-El panel requiere `ZC_LOGIN_MODE=local`. El flujo externo de redirección con tickets (`ZC_LOGIN_MODE=ui`) es una integración diferente y no se activa con este panel. Estas pruebas consultan directamente la caché; la prueba DNS del Interceptor sigue en el smoke test.
+El panel requiere `ZC_LOGIN_MODE=local`. El flujo externo de redirección con tickets (`ZC_LOGIN_MODE=ui`) es una integración diferente y no se activa con este panel. Estas pruebas consultan directamente la caché; el smoke test comprueba DNS con el servicio `dns-api` como se indica abajo.
 
 El emulador es Firestore de Google. Las cuentas del proyecto usan JWT/bcrypt y colecciones Firestore; no necesitan el emulador de Firebase Authentication. El API usa `FIRESTORE_EMULATOR_HOST` sin protocolo y exige un proyecto `demo-`. Compose fija `demo-ic7602-p2`, no carga credenciales del `.env` y no conecta a Firestore hospedado. El seed se niega a ejecutarse sin esas condiciones. La UI pasa `/api/*` por Nginx al API y desactiva las integraciones de telemetría Vercel en su imagen local.
 
@@ -48,25 +67,26 @@ Todos los puertos publicados se limitan a `127.0.0.1`.
 | REST API Java | http://localhost:18080/api/items.json |
 | Apache | http://localhost:18081/index.html |
 | Caché zonal | http://127.0.0.1:80, encabezado `Host: p2.test` |
+| DNS API (Realtime Database real) | http://localhost:18083/health |
 | DNS Interceptor | UDP 127.0.0.1:1053 (contenedor 5353) |
 
 ## Comprobar la integración
 
-Después de iniciar Compose:
+El smoke test comprueba la demostración del P2 y requiere que `multi.test` tenga al menos un destino saludable en la base del DNS API:
 
 ```bash
 docker compose ps -a
 docker compose run --rm local-smoke
 ```
 
-El smoke test comprueba HTML de la UI, proxy del API, conectividad Firestore, login, dominio inicial, CRUD Java a través de la caché, `MISS`/`HIT` para JSON/HTML, y consulta DNS UDP para `p2.test`. También crea un dominio temporal solo en el emulador y verifica API keys, CSRF, login correcto/incorrecto, MISS/HIT autenticados y revocación de sesión mediante el API del panel. Borra sus datos al terminar y no modifica las reglas de `p2.test`.
+El smoke test comprueba HTML de la UI, proxy del API, conectividad Firestore, login, dominio inicial, CRUD Java a través de la caché, `MISS`/`HIT` para JSON/HTML, y consulta DNS UDP para `multi.test`, contrastando la respuesta con los destinos saludables que devuelve el DNS API. También crea un dominio temporal solo en el emulador y verifica API keys, CSRF, login correcto/incorrecto, MISS/HIT autenticados y revocación de sesión mediante el API del panel. Borra sus datos al terminar y no modifica las reglas de `p2.test`.
 
 Pruebas manuales en PowerShell:
 
 ```powershell
 Invoke-RestMethod http://localhost:3000/api/health/db
 Invoke-RestMethod http://localhost:18080/api/health
-nslookup -port=1053 p2.test 127.0.0.1
+nslookup -port=1053 google.com 127.0.0.1
 curl.exe --noproxy "*" --resolve p2.test:80:127.0.0.1 -i http://p2.test/index.html
 curl.exe --noproxy "*" --resolve p2.test:80:127.0.0.1 -i http://p2.test/index.html
 curl.exe --noproxy "*" --resolve p2.test:80:127.0.0.1 -i http://p2.test/api/items.json
@@ -96,7 +116,7 @@ Opcionalmente copie `.env.example` a `.env` para personalizar las variables `LOC
 ## Diagnóstico
 
 - `open dockerfile: no such file`: el archivo del Interceptor debe llamarse exactamente `Interceptor/dockerfile`, en minúsculas, igual que `compose.yaml`. En Windows, un cambio de mayúsculas requiere renombrar primero a un nombre temporal y luego al nombre correcto.
-- Puerto ocupado: detenga el proceso que ocupa 80, 1053, 3000, 5173, 18080, 18081 o 18082; vea `docker compose ps` y `docker compose logs`. Para DNS puede definir `LOCAL_DNS_PORT` en `.env`; el puerto predeterminado 1053 evita el 5353 reservado por mDNS en muchos equipos Windows.
+- Puerto ocupado: detenga el proceso que ocupa 80, 1053, 3000, 5173, 18080, 18081, 18082 o 18083; vea `docker compose ps` y `docker compose logs`. Para DNS puede definir `LOCAL_DNS_PORT` en `.env`; el puerto predeterminado 1053 evita el 5353 reservado por mDNS en muchos equipos Windows.
 - `local-seed` termina con código 0: es lo esperado; el API empieza después de completarse. Un código distinto de 0 impide iniciar los servicios dependientes.
 - Si `nslookup` de Windows devuelve `recvfrom: No error` o `No response from server`, ejecute `docker compose run --rm local-smoke` para comprobar DNS desde la red Docker. En la validación local también se comprobó una consulta UDP desde el host; el fallo de esa herramienta de Windows quedó sin resolver.
 - Configuración de caché aún sin cambios: el refresco local ocurre cada 5 s. Las respuestas GET ya cacheadas conservan su contenido hasta el TTL.

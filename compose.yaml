@@ -145,16 +145,33 @@ services:
           - zc-cr.default.svc.cluster.local
           - p2.test
 
+  dns-api:
+    build: ./dns-api
+    environment:
+      DNS_API_PORT: "8080"
+      DB_URL: ${DNS_DATABASE_URL:-https://p2-redes-b7bab-default-rtdb.firebaseio.com}
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/dns-firebase
+    secrets:
+      - dns-firebase
+    ports:
+      - "127.0.0.1:18083:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
   dns-interceptor:
     build:
       context: ./Interceptor
       dockerfile: dockerfile
     command: ["--port", "5353"]
     depends_on:
-      api-nodejs:
+      dns-api:
         condition: service_healthy
     environment:
-      DNS_API_URL: http://api-nodejs:3000
+      DNS_API_URL: ${DNS_API_URL:-http://dns-api:8080}
     ports:
       - "127.0.0.1:${LOCAL_DNS_PORT:-1053}:5353/udp"
 
@@ -164,6 +181,10 @@ services:
     command: ["node", "scripts/local-smoke.js"]
     environment:
       <<: [*demo-env, *emulator-env]
+
+secrets:
+  dns-firebase:
+    file: ${DNS_FIREBASE_CREDENTIALS:-./secrets/firebase-service-account.json}
 
 volumes:
   firestore-data:

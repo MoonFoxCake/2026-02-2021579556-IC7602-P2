@@ -23,13 +23,13 @@ IP-to-Country reutiliza el esquema y la consulta indexada del P1 en Realtime Dat
 
 ## Compose local
 
-Con Docker Desktop en modo Linux, desde la raíz del repo:
+Con Docker Compose v2, coloque la cuenta de servicio en `secrets/firebase-service-account.json` (ya preparada en este equipo) y ejecute desde la raíz:
 
 ```bash
 docker compose up --build -d --wait
 ```
 
-Abra http://localhost:5173 e ingrese con `demo@p2.test` / `local-demo-password`. Compose incluye la UI, el API Node.js, el emulador Firestore, el Interceptor, la caché zonal, Java y Apache. No necesita `.env`, credenciales Firebase, Vercel, Helm ni instalaciones locales de Node/Java. La primera construcción descarga imágenes y dependencias; la aplicación usa servicios locales al ejecutarse.
+Abra http://localhost:5173 e ingrese con `demo@p2.test` / `local-demo-password`. Compose incluye la UI, el API Node.js, el emulador Firestore, el Interceptor, la caché zonal, Java y Apache. El DNS API del P1 está integrado en `dns-api/` y arranca con Compose; el interceptor lo consulta por la red interna. Su endpoint local es http://localhost:18083/health. El resto del P2 no necesita `.env`, credenciales Firebase, Vercel, Helm ni instalaciones locales de Node/Java. La primera construcción descarga imágenes y dependencias.
 
 El dominio `p2.test` se crea verificado **solo en el emulador**, con reglas para Apache (`/*`) y Java (`/api/*`). Las cuentas usan el mecanismo JWT/bcrypt del API sobre Firestore; este proyecto no usa Firebase Authentication. Guía con puertos, pruebas, persistencia y diagnóstico: [docs/LOCAL.md](docs/LOCAL.md).
 

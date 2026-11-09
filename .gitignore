@@ -10,3 +10,8 @@ dist/
 *.tsbuildinfo
 .playwright-cli/
 output/playwright/
+
+# Firebase private keys mounted at runtime
+secrets/
+*firebase-adminsdk*.json
+dependency-reduced-pom.xml

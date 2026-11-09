@@ -1,0 +1,146 @@
+name: ic7602-p2-local
+
+x-api-image: &api-image
+  image: ic7602-p2-api:local
+  build: ./api-nodejs
+
+x-emulator-env: &emulator-env
+  FIREBASE_PROJECT_ID: demo-ic7602-p2
+  FIRESTORE_EMULATOR_HOST: firestore-emulator:8080
+
+x-demo-env: &demo-env
+  LOCAL_DEMO_EMAIL: ${LOCAL_DEMO_EMAIL:-demo@p2.test}
+  LOCAL_DEMO_PASSWORD: ${LOCAL_DEMO_PASSWORD:-local-demo-password}
+
+services:
+  firestore-emulator:
+    build: ./deploy/local/firestore
+    environment:
+      FIREBASE_PROJECT_ID: demo-ic7602-p2
+      CLOUDSDK_CORE_DISABLE_USAGE_REPORTING: "true"
+      CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK: "true"
+    ports:
+      - "127.0.0.1:18082:8080"
+    volumes:
+      - firestore-data:/data
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+
+  local-seed:
+    <<: *api-image
+    command: ["node", "scripts/local-seed.js"]
+    environment:
+      <<: [*emulator-env, *demo-env]
+    depends_on:
+      firestore-emulator:
+        condition: service_healthy
+
+  api-nodejs:
+    <<: *api-image
+    environment:
+      <<: *emulator-env
+      PORT: "3000"
+      # Public development placeholders, scoped to this loopback-only emulator stack.
+      JWT_SECRET: ${LOCAL_JWT_SECRET:-local-emulator-only-jwt-secret-at-least-32-chars}
+      SERVICE_KEY: ${LOCAL_SERVICE_KEY:-local-emulator-only-service-key}
+      CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+      ZONE_CACHES: cr=127.0.0.1,us=127.0.0.1
+      COUNTRY_ZONES: CR=cr,US=us,*=cr
+      IP_COUNTRY_RANGES: 0.0.0.0/0=CR
+    depends_on:
+      local-seed:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health/db').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 7s
+      retries: 12
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      api-nodejs:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:5173:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+
+  rest-api-java:
+    build: ./rest-api-java
+    ports:
+      - "127.0.0.1:18080:8080"
+    networks:
+      default:
+        aliases:
+          - rest-api-java.default.svc.cluster.local
+
+  apache-web:
+    build: ./apache-web
+    ports:
+      - "127.0.0.1:18081:8080"
+    networks:
+      default:
+        aliases:
+          - apache-web.default.svc.cluster.local
+
+  zonal-cache:
+    build: ./ZonalCache
+    depends_on:
+      api-nodejs:
+        condition: service_healthy
+      rest-api-java:
+        condition: service_started
+      apache-web:
+        condition: service_started
+    environment:
+      ZC_CONFIG_URL: http://api-nodejs:3000
+      ZC_CONFIG_TOKEN: ${LOCAL_SERVICE_KEY:-local-emulator-only-service-key}
+      ZC_ZONE: cr
+      ZC_HTTP_PORT: "8080"
+      ZC_COOKIE_SECURE: "0"
+      ZC_CACHE_DIR: /var/cache/zc
+      ZC_CONFIG_REFRESH_SECS: "5"
+      ZC_LOGIN_MODE: local
+    ports:
+      - "127.0.0.1:80:8080"
+    volumes:
+      - zonal-cache-data:/var/cache/zc
+    networks:
+      default:
+        aliases:
+          - zc-cr.default.svc.cluster.local
+
+  dns-interceptor:
+    build:
+      context: ./Interceptor
+      dockerfile: dockerfile
+    command: ["--port", "5353"]
+    depends_on:
+      api-nodejs:
+        condition: service_healthy
+    environment:
+      DNS_API_URL: http://api-nodejs:3000
+    ports:
+      - "127.0.0.1:5353:5353/udp"
+
+  local-smoke:
+    <<: *api-image
+    profiles: ["tools"]
+    command: ["node", "scripts/local-smoke.js"]
+    environment:
+      <<: *demo-env
+
+volumes:
+  firestore-data:
+  zonal-cache-data:

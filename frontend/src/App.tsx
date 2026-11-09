@@ -91,7 +91,7 @@ export default function App() {
       <header className="flex min-h-16 items-center justify-between gap-4 border-b border-slate-200 bg-white/80 px-5 sm:px-8"><p className="truncate text-xs text-slate-400">Consola / <span className="text-slate-600">{currentView.label}</span></p><div className="flex items-center gap-3">{session ? <><span className="hidden max-w-48 truncate text-sm text-slate-600 sm:inline">{session.user.email}</span><Button type="button" secondary onClick={logout}>Cerrar sesión</Button></> : <Button type="button" onClick={() => { setView('account'); setNotice(null) }}>Iniciar sesión</Button>}</div></header>
       <main className="mx-auto max-w-7xl px-4 py-7 sm:px-8 sm:py-10"><div className="mb-5"><Notice value={notice} /></div>{content}<footer className="mt-12 border-t border-slate-200 pt-5 text-xs text-slate-400">Tecnológico de Costa Rica <span className="px-1">·</span> IC7602 <span className="px-1">·</span> Proyecto 2</footer></main>
     </div>
-    <Analytics /><SpeedInsights />
+    {import.meta.env.VITE_DISABLE_TELEMETRY !== 'true' && <><Analytics /><SpeedInsights /></>}
   </div>
 }
 

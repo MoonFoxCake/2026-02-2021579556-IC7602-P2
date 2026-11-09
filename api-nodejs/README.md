@@ -1,49 +1,19 @@
-# P2 Redes - REST API (Node.js + Firestore)
+# REST API Node.js
 
-API en Node.js para el Proyecto 2 de Redes (IC7602). Se despliega en Vercel y usa Firestore como base de datos.
+API Express con Firebase Admin/Firestore para la UI, el DNS Interceptor y las cachés zonales. El destino de producción definido por el proyecto es Vercel con deployments desde GitHub; el Dockerfile sirve para desarrollo e integración local con Compose.
 
-> Estado: esqueleto inicial (conexion con Firestore). Los endpoints se documentaran aqui conforme se implementen.
+## Local y contenedor
 
-## Requisitos
+Requiere Node.js 20 o superior.
 
-- Node.js 18 o superior
-- Un proyecto de Firebase con Firestore creado y una clave de cuenta de servicio (JSON)
+```bash
+npm ci
+npm start
+npm test
+```
 
-## Puesta en marcha local
+Para contenedor, cree `.env` desde `.env.example` en la raíz del repositorio, configure Firebase y secretos recién rotados, y ejecute `docker compose up --build api-nodejs`. La imagen corre sin root, publica el puerto 3000 y excluye env files y claves de cuenta de servicio del contexto. Compruebe `/api/health` (proceso) y `/api/health/db` (conectividad Firestore).
 
-1. Instalar dependencias:
+Variables principales: `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, `JWT_SECRET`, `SERVICE_KEY`, `ZONE_CACHES`, `COUNTRY_ZONES`, `IP_COUNTRY_RANGES` y `CORS_ORIGINS`. Nunca agregue valores secretos a Dockerfile, Compose, Helm values o Git.
 
-   ```bash
-   npm install
-   ```
-
-2. Generar el archivo `.env` desde el JSON de la cuenta de servicio:
-
-   ```bash
-   npm run env:from-json -- "ruta/al/archivo.json"
-   ```
-
-   (Alternativa manual: copiar `.env.example` a `.env` y llenar las tres variables.)
-
-3. Probar la conexion con Firestore:
-
-   ```bash
-   npm run test:firestore
-   ```
-
-   Debe imprimir `Escritura OK`, `Lectura OK` y `Borrado OK`.
-
-## Variables de entorno
-
-| Variable | Descripcion |
-|---|---|
-| `FIREBASE_PROJECT_ID` | ID del proyecto de Firebase |
-| `FIREBASE_CLIENT_EMAIL` | Correo de la cuenta de servicio |
-| `FIREBASE_PRIVATE_KEY` | Clave privada (con saltos de linea escapados como `\n`) |
-
-No hay valores quemados en el codigo. En Vercel se configuran en *Project Settings > Environment Variables*.
-
-## Seguridad
-
-- `.env` y el JSON de la cuenta de servicio estan en `.gitignore`: **nunca** se suben al repositorio.
-- Las reglas de Firestore estan en modo produccion (`allow read, write: if false;`); solo este API accede a los datos mediante el Admin SDK.
+La guía de servicios y despliegue Minikube está en [docs/KUBERNETES.md](../docs/KUBERNETES.md). El contrato del API y los modelos Firestore están en [API.md](API.md).

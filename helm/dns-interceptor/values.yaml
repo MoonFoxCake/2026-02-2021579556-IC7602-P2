@@ -1,0 +1,13 @@
+image:
+  repository: dns-interceptor
+  tag: dev
+  pullPolicy: IfNotPresent
+
+api:
+  url: ""
+
+service:
+  type: LoadBalancer
+  port: 53
+
+resources: {}

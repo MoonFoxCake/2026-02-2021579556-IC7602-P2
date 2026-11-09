@@ -1,0 +1,11 @@
+image:
+  repository: rest-api-java
+  tag: dev
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+
+replicaCount: 1
+resources: {}

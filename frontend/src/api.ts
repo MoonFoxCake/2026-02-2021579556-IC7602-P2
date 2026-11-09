@@ -20,7 +20,7 @@ export type ApiKey = { id: string; prefix: string; createdAt: string | null }
 export type CreatedApiKey = ApiKey & { apiKey: string }
 export type UrlUser = { username: string; createdAt: string | null }
 export type UrlRuleInput = Omit<UrlRule, 'id' | 'domain' | 'createdAt'>
-export type CacheTestInput = { urlId: string; host: string; path: string }
+export type CacheTestInput = { urlId: string; host: string; path: string; zone?: string }
 export type CacheTestResult = { status: number; elapsedMs: number; headers: Record<string, string>; body: string; truncated: boolean; requiresLogin: boolean }
 
 let token: string | null = null
@@ -64,7 +64,7 @@ async function request<T>(path: string, method = 'GET', body?: unknown, account 
 
 export const api = {
   authorizeCache: (input: { domain: string; pattern: string; callback: string; returnTo: string; username: string; password: string }) => request<{ redirectUrl: string }>('/cache-login', 'POST', input, false),
-  cacheTestStatus: () => request<{ enabled: boolean }>('/cache-test/status'),
+  cacheTestStatus: () => request<{ enabled: boolean; zones: string[] }>('/cache-test/status'),
   testCache: (input: CacheTestInput & { apiKey?: string }) => request<CacheTestResult>('/cache-test/request', 'POST', input),
   loginCache: (input: CacheTestInput & { username: string; password: string }) => request<{ authenticated: boolean; status: number; message: string }>('/cache-test/login', 'POST', input),
   logoutCache: (input: CacheTestInput) => request<{ authenticated: boolean }>('/cache-test/logout', 'POST', input),

@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const express = require('express');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const { createCacheTestRouter } = require('../src/cache-test-routes');
 const { cors } = require('../src/cors');
 
@@ -19,8 +20,24 @@ async function start(t, overrides = {}) {
     let body = '';
     for await (const chunk of req) body += chunk;
     seen.push({ path: req.url, headers: req.headers, body });
+    if (req.url.startsWith('/__zc/callback')) {
+      const ticket = new URL(req.url, 'http://cache.test').searchParams.get('ticket');
+      const [payload, mac] = ticket.split('.');
+      const expected = require('crypto').createHmac('sha256', overrides.TICKET_SECRET).update(payload).digest('hex');
+      assert.equal(mac, expected);
+      const data = JSON.parse(Buffer.from(payload, 'base64url'));
+      assert.equal(data.domain, 'demo.test'); assert.equal(data.pattern, '/*'); assert.equal(data.user, 'reader');
+      assert.ok(data.exp > Date.now() / 1000);
+      activeSession = true;
+      res.statusCode = 302; res.setHeader('Location', '/private/index.html');
+      res.setHeader('Set-Cookie', `zc_session=${session}; HttpOnly; Secure`);
+      return res.end();
+    }
     if (req.url.startsWith('/__zc/login')) {
       if (req.method === 'GET') {
+        if (overrides.CACHE_TEST_LOGIN_MODE === 'ui') {
+          res.statusCode = 302; res.setHeader('Location', 'https://ui.test/cache-login?domain=demo.test'); return res.end();
+        }
         res.setHeader('Set-Cookie', `zc_csrf=${csrf}; HttpOnly`);
         return res.end(`<input name="csrf" value="${csrf}">`);
       }
@@ -33,9 +50,9 @@ async function start(t, overrides = {}) {
       res.setHeader('Set-Cookie', `zc_session=${session}; HttpOnly`);
       return res.end();
     }
-    if (req.url.startsWith('/__zc/logout')) { activeSession = false; res.statusCode = 302; return res.end(); }
+    if (req.url.startsWith('/__zc/logout')) { if (req.headers.cookie === `zc_session=${session}`) activeSession = false; res.statusCode = 302; return res.end(); }
     if (req.url.startsWith('/private') && (!activeSession || req.headers.cookie !== `zc_session=${session}`)) {
-      res.statusCode = 302; res.setHeader('Location', '/__zc/login?return_to=x'); return res.end();
+      res.statusCode = 302; res.setHeader('Location', overrides.CACHE_TEST_LOGIN_MODE === 'ui' ? 'https://ui.test/cache-login?domain=demo.test' : '/__zc/login?return_to=x'); return res.end();
     }
     if (req.url.startsWith('/key') && req.headers['x-api-key'] !== 'valid-key') { res.statusCode = 401; return res.end('denied'); }
     if (req.url.startsWith('/redirect')) { res.statusCode = 302; res.setHeader('Location', 'http://external.invalid/'); return res.end(); }
@@ -46,10 +63,13 @@ async function start(t, overrides = {}) {
   await new Promise((resolve) => cache.listen(0, '127.0.0.1', resolve));
   const env = { JWT_SECRET: secret, CACHE_TEST_URL: `http://127.0.0.1:${cache.address().port}`,
     CACHE_TEST_COOKIE_SECURE: '0', CORS_ORIGINS: 'http://ui.test', ...overrides };
+  if (overrides.CACHE_TEST_URLS === 'test-zones') env.CACHE_TEST_URLS = JSON.stringify({ cr: env.CACHE_TEST_URL, us: env.CACHE_TEST_URL });
+  const passwordHash = bcrypt.hashSync('correct-password', 4);
   const store = {
     getUrl: async (id) => id === 'missing' ? null : ({ id, ownerId: id === 'foreign' ? 'other' : 'owner',
       domain: id === 'wildcard' ? '*.demo.test' : 'demo.test', authType: 'userpass', pattern: '/*' }),
     getDomain: async (id) => ({ id, ownerId: 'owner', verified: id !== 'unverified.test' }),
+    getUser: async (id) => id === 'own_reader' ? { username: 'reader', passwordHash } : null,
   };
   const app = express(); app.use(cors({ env })); app.use(express.json());
   app.use('/api/cache-test', createCacheTestRouter({ env, store }));
@@ -139,4 +159,47 @@ test('cross-origin credentials are allowed only for configured UI origins', asyn
   assert.equal(allowed.response.headers.get('access-control-allow-credentials'), 'true');
   const denied = await s.call('/status', {}, { origin: 'http://other.test' }, 'GET');
   assert.equal(denied.response.headers.get('access-control-allow-origin'), null);
+});
+
+test('zones are fixed server configuration; gateway headers preserve the resource host without forwarding admin credentials', async (t) => {
+  const s = await start(t, { CACHE_TEST_URLS: 'test-zones', CACHE_TEST_TUNNEL_KEY: 'test-only-private-gateway-key' });
+  assert.deepEqual((await s.call('/status', {}, {}, 'GET')).json, { enabled: true, zones: ['cr', 'us'] });
+  assert.equal((await s.call('/request', { zone: 'https://attacker.test' })).response.status, 400);
+  assert.equal(s.seen.length, 0);
+  assert.equal((await s.call('/request', { zone: 'us' })).response.status, 200);
+  assert.match(s.seen[0].headers.host, /^127\.0\.0\.1:/);
+  assert.equal(s.seen[0].headers['x-p2-cache-host'], 'demo.test');
+  assert.equal(s.seen[0].headers['x-p2-cache-key'], 'test-only-private-gateway-key');
+  assert.equal(s.seen[0].headers.authorization, undefined);
+  for (const CACHE_TEST_URLS of ['not-json', 'null', '{"cr":"https://example.com/private"}']) {
+    const bad = await start(t, { CACHE_TEST_URLS });
+    assert.equal((await bad.call('/status', {}, {}, 'GET')).response.status, 503);
+  }
+});
+
+test('UI ticket login verifies bcrypt, redeems at the fixed cache, isolates zones and uses first-party secure cookies', async (t) => {
+  const s = await start(t, { CACHE_TEST_URLS: 'test-zones', CACHE_TEST_LOGIN_MODE: 'ui',
+    TICKET_SECRET: 'test-only-shared-ticket-secret-with-more-than-32-chars', CACHE_TEST_COOKIE_SECURE: '1' });
+  const input = { zone: 'cr', path: '/private/index.html', username: 'reader', password: 'wrong-password' };
+  assert.equal((await s.call('/request', input)).json.requiresLogin, true);
+  const wrong = await s.call('/login', input);
+  assert.equal(wrong.response.status, 200); assert.equal(wrong.json.status, 401); assert.equal(wrong.json.authenticated, false);
+  const login = await s.call('/login', { ...input, password: 'correct-password' });
+  assert.equal(login.json.authenticated, true);
+  assert.ok(!JSON.stringify(login.json).includes(session));
+  const cookieLine = login.response.headers.get('set-cookie');
+  assert.match(cookieLine, /HttpOnly/); assert.match(cookieLine, /Secure/); assert.match(cookieLine, /SameSite=Lax/);
+  const cookie = cookieLine.split(';')[0];
+  assert.equal((await s.call('/request', input, { cookie })).json.status, 200);
+  assert.equal((await s.call('/request', { ...input, zone: 'us' }, { cookie })).json.requiresLogin, true);
+  await s.call('/logout', input, { cookie });
+  assert.equal((await s.call('/request', input, { cookie })).json.requiresLogin, true);
+});
+
+test('UI panel login limits failures and fails closed when the signing secret is missing', async (t) => {
+  const s = await start(t, { CACHE_TEST_LOGIN_MODE: 'ui', TICKET_SECRET: 'test-only-shared-ticket-secret-with-more-than-32-chars' });
+  for (let attempt = 0; attempt < 5; attempt++) assert.equal((await s.call('/login', { username: 'reader', password: 'bad' })).json.status, 401);
+  assert.equal((await s.call('/login', { username: 'reader', password: 'correct-password' })).response.status, 429);
+  const missing = await start(t, { CACHE_TEST_LOGIN_MODE: 'ui' });
+  assert.equal((await missing.call('/login', { username: 'reader', password: 'correct-password' })).response.status, 503);
 });

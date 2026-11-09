@@ -7,6 +7,9 @@ const express = require('express');
 const { requireAuth } = require('./auth');
 const { firestoreUrlsStore } = require('./urls-routes');
 const { normalizeDomain } = require('./domains-routes');
+const { verifyCredentials } = require('./cache-routes');
+const { createCacheTicket } = require('./cache-login-routes');
+const { createLoginLimiter } = require('./auth-routes');
 
 const LIMIT = 64 * 1024;
 const TOKEN = /^[a-f0-9]{64}$/;
@@ -18,11 +21,12 @@ function cookieValue(lines, name) {
 }
 
 // Fixed infrastructure destination; user input can select a resource, never a server.
-function cacheRequest(endpoint, host, path, { method = 'GET', headers = {}, body } = {}) {
+function cacheRequest(endpoint, host, path, { method = 'GET', headers = {}, body, tunnelKey } = {}) {
   return new Promise((resolve, reject) => {
     let timer;
     const request = (endpoint.protocol === 'https:' ? https : http).request(endpoint, {
-      method, path, headers: { ...headers, host, ...(body === undefined ? {} : {
+      method, path, servername: endpoint.hostname, headers: { ...headers, host: tunnelKey ? endpoint.host : host,
+        ...(tunnelKey ? { 'x-p2-cache-host': host, 'x-p2-cache-key': tunnelKey } : {}), ...(body === undefined ? {} : {
         'content-type': 'application/x-www-form-urlencoded', 'content-length': Buffer.byteLength(body),
       }) },
     }, (response) => {
@@ -51,21 +55,44 @@ function cacheRequest(endpoint, host, path, { method = 'GET', headers = {}, body
   });
 }
 
+function configuredCaches(env) {
+  const values = env.CACHE_TEST_URLS ? JSON.parse(env.CACHE_TEST_URLS)
+    : env.CACHE_TEST_URL ? { cr: env.CACHE_TEST_URL } : {};
+  if (!values || Array.isArray(values) || typeof values !== 'object') throw new Error('Invalid cache map');
+  return new Map(Object.entries(values).map(([zone, value]) => {
+    const url = new URL(value);
+    if (!/^[a-z0-9-]{1,20}$/.test(zone) || !['http:', 'https:'].includes(url.protocol)
+      || url.username || url.password || url.pathname !== '/' || url.search || url.hash
+      || (env.CACHE_TEST_TUNNEL_KEY && url.protocol !== 'https:' && !['127.0.0.1', 'localhost'].includes(url.hostname))) {
+      throw new Error('Invalid cache endpoint');
+    }
+    return [zone, url];
+  }));
+}
+
 function createCacheTestRouter({ store = firestoreUrlsStore(), env = process.env } = {}) {
   const router = express.Router();
   router.use(requireAuth({ env }));
   router.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
+  const limiter = createLoginLimiter({ max: 5, windowMs: 300000 });
+  const send = (context, path, options = {}) => cacheRequest(context.endpoint, context.host, path,
+    { ...options, tunnelKey: env.CACHE_TEST_TUNNEL_KEY });
 
-  router.get('/status', (req, res) => res.json({ enabled: Boolean(env.CACHE_TEST_URL) }));
+  router.get('/status', (req, res) => {
+    try {
+      const zones = [...configuredCaches(env).keys()];
+      res.json({ enabled: zones.length > 0, zones });
+    } catch { res.status(503).json({ error: 'Revisa la configuración de las cachés de prueba.' }); }
+  });
 
   router.use(async (req, res, next) => {
-    if (!env.CACHE_TEST_URL) return res.status(503).json({ error: 'El entorno no tiene una caché de prueba configurada.' });
-    let endpoint;
-    try { endpoint = new URL(env.CACHE_TEST_URL); } catch { /* invalid server configuration */ }
-    if (!endpoint || !['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password
-        || endpoint.pathname !== '/' || endpoint.search || endpoint.hash) {
-      return res.status(503).json({ error: 'CACHE_TEST_URL debe ser un origen HTTP/HTTPS sin ruta ni credenciales.' });
-    }
+    let endpoints;
+    try { endpoints = configuredCaches(env); }
+    catch { return res.status(503).json({ error: 'Revisa la configuración de las cachés de prueba.' }); }
+    if (!endpoints.size) return res.status(503).json({ error: 'El entorno no tiene una caché de prueba configurada.' });
+    const zone = req.body?.zone === undefined ? endpoints.keys().next().value : req.body.zone;
+    const endpoint = endpoints.get(zone);
+    if (!endpoint) return res.status(400).json({ error: 'Selecciona una zona de caché configurada.' });
     const { urlId, host, path } = req.body || {};
     if (typeof urlId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(urlId)) {
       return res.status(400).json({ error: 'Selecciona una regla de caché.' });
@@ -90,8 +117,8 @@ function createCacheTestRouter({ store = firestoreUrlsStore(), env = process.env
           || decoded.startsWith('/__zc/')) {
         return res.status(400).json({ error: 'Usa una ruta local, por ejemplo /index.html; las rutas /__zc/ están reservadas.' });
       }
-      req.cacheTest = { endpoint, rule, host: parsed.domain, path,
-        cookieName: `p2_zc_${crypto.createHash('sha256').update(req.user.id).digest('hex').slice(0, 16)}_${urlId}` };
+      req.cacheTest = { endpoint, zone, rule, host: parsed.domain, path,
+        cookieName: `p2_zc_${crypto.createHash('sha256').update(req.user.id).digest('hex').slice(0, 16)}_${urlId}_${zone}` };
       next();
     } catch (error) { next(error); }
     return undefined;
@@ -102,7 +129,7 @@ function createCacheTestRouter({ store = firestoreUrlsStore(), env = process.env
     return TOKEN.test(value) ? `zc_session=${value}` : '';
   }
   const cookieOptions = () => ({ httpOnly: true, secure: env.CACHE_TEST_COOKIE_SECURE !== '0',
-    sameSite: env.CACHE_TEST_COOKIE_SECURE === '0' ? 'strict' : 'none', path: '/api/cache-test' });
+    sameSite: env.CACHE_TEST_COOKIE_SECURE === '0' ? 'strict' : 'lax', path: '/api/cache-test' });
 
   router.post('/request', async (req, res) => {
     const { endpoint, host, path } = req.cacheTest;
@@ -112,13 +139,13 @@ function createCacheTestRouter({ store = firestoreUrlsStore(), env = process.env
     }
     try {
       const started = performance.now();
-      const result = await cacheRequest(endpoint, host, path, { headers: {
+      const result = await send(req.cacheTest, path, { headers: {
         ...(apiKey ? { 'x-api-key': apiKey } : {}), ...(session(req) ? { cookie: session(req) } : {}),
       } });
       return res.json({ status: result.status, elapsedMs: Math.round(performance.now() - started),
         headers: Object.fromEntries(HEADERS.filter((name) => result.headers[name] !== undefined)
           .map((name) => [name, result.headers[name]])), body: result.body, truncated: result.truncated,
-        requiresLogin: result.status === 302 && String(result.headers.location || '').startsWith('/__zc/login'),
+        requiresLogin: result.status === 302 && ['/__zc/login', '/cache-login'].includes(new URL(result.headers.location || '/', endpoint).pathname),
       });
     } catch { return res.status(502).json({ error: 'No se pudo consultar la caché. Comprueba su conexión y estado.' }); }
   });
@@ -130,19 +157,46 @@ function createCacheTestRouter({ store = firestoreUrlsStore(), env = process.env
         || typeof password !== 'string' || !password || Buffer.byteLength(password) > 72) {
       return res.status(400).json({ error: 'Selecciona una regla con usuario/contraseña e ingresa credenciales válidas.' });
     }
+    const limitKey = `${req.user.id}:${rule.id}:${username}`;
+    const retry = limiter.retryAfterSeconds(limitKey);
+    if (retry) return res.set('Retry-After', String(retry)).status(429).json({ error: 'Demasiados intentos. Inténtalo más tarde.' });
     try {
       const loginPath = `/__zc/login?return_to=${encodeURIComponent(path)}`;
-      const form = await cacheRequest(endpoint, host, loginPath);
-      const csrf = cookieValue(form.headers['set-cookie'], 'zc_csrf');
-      if (form.status !== 200 || !TOKEN.test(csrf)) {
-        return res.status(502).json({ error: 'La caché no ofrece un formulario local para esta ruta. Espera el refresco y revisa la regla y el modo de login.' });
+      const form = await send(req.cacheTest, loginPath);
+      let result;
+      if (env.CACHE_TEST_LOGIN_MODE === 'ui') {
+        if (!env.TICKET_SECRET || env.TICKET_SECRET.length < 32) return res.status(503).json({ error: 'El acceso externo no está configurado.' });
+        if (form.status !== 302 || new URL(form.headers.location || '/', endpoint).pathname !== '/cache-login') {
+          return res.status(502).json({ error: 'La caché aún no ofrece acceso externo para esta ruta. Revisa la regla y espera el refresco.' });
+        }
+        const valid = await verifyCredentials({
+          getDomain: (domain) => store.getDomain(domain),
+          findUrl: async () => rule,
+          getUser: (urlId, name) => store.getUser(`${urlId}_${name}`),
+        }, require('bcryptjs').compare, { domain: rule.domain, pattern: rule.pattern, username, password });
+        if (!valid) {
+          limiter.fail(limitKey);
+          res.clearCookie(cookieName, cookieOptions());
+          return res.json({ authenticated: false, status: 401, message: 'Usuario o contraseña incorrectos.' });
+        }
+        const ticket = createCacheTicket({ domain: host, pattern: rule.pattern, user: username }, env.TICKET_SECRET);
+        const callback = `/__zc/callback?${new URLSearchParams({ ticket, return_to: path })}`;
+        if (callback.length > 2000) return res.status(400).json({ error: 'La ruta de retorno es demasiado larga.' });
+        result = await send(req.cacheTest, callback);
+      } else {
+        const csrf = cookieValue(form.headers['set-cookie'], 'zc_csrf');
+        if (form.status !== 200 || !TOKEN.test(csrf)) {
+          return res.status(502).json({ error: 'La caché no ofrece un formulario local para esta ruta. Revisa el modo de login.' });
+        }
+        result = await send(req.cacheTest, '/__zc/login', {
+          method: 'POST', headers: { cookie: `zc_csrf=${csrf}` },
+          body: new URLSearchParams({ csrf, username, password, return_to: path }).toString(),
+        });
       }
-      const result = await cacheRequest(endpoint, host, '/__zc/login', {
-        method: 'POST', headers: { cookie: `zc_csrf=${csrf}` },
-        body: new URLSearchParams({ csrf, username, password, return_to: path }).toString(),
-      });
       const token = cookieValue(result.headers['set-cookie'], 'zc_session');
       const authenticated = result.status === 302 && TOKEN.test(token);
+      if (authenticated) limiter.reset(limitKey);
+      else if (result.status === 401) limiter.fail(limitKey);
       if (authenticated) res.cookie(cookieName, token, cookieOptions());
       else res.clearCookie(cookieName, cookieOptions());
       return res.json({ authenticated, status: result.status,
@@ -155,7 +209,7 @@ function createCacheTestRouter({ store = firestoreUrlsStore(), env = process.env
   router.post('/logout', async (req, res) => {
     const { endpoint, host, cookieName } = req.cacheTest;
     try {
-      await cacheRequest(endpoint, host, '/__zc/logout?return_to=%2F', { headers: { cookie: session(req) } });
+      await send(req.cacheTest, '/__zc/logout?return_to=%2F', { headers: { cookie: session(req) } });
       res.clearCookie(cookieName, cookieOptions());
       return res.json({ authenticated: false });
     } catch { return res.status(502).json({ error: 'No se pudo cerrar la sesión en la caché. Intenta de nuevo.' }); }

@@ -8,10 +8,10 @@ cd "$(dirname "$0")/.."
 API_DIR=../api-nodejs
 [ -d "$API_DIR/node_modules/express" ] || { echo "Falta: cd api-nodejs && npm install"; exit 2; }
 BIN=${ZC_BIN:-./zonal-cache}
-W=$(mktemp -d /tmp/zc_e2e_api.XXXX); HP=18081; AP=19901; OW=19821; OJ=19822; KEY=clave-de-servicio-e2e
+W=$(mktemp -d /tmp/zc_e2e_api.XXXX); HP=${ZC_E2E_API_HTTP_PORT:-18381}; AP=19901; OW=19821; OJ=19822; KEY=clave-de-servicio-e2e
 OK=0; FAIL=0; DEMO=; API=; OR1=; OR2=
 check() { if (set +o pipefail; eval "$2"); then OK=$((OK+1)); echo "  ok   $1"; else FAIL=$((FAIL+1)); echo "  FALLO $1"; fi; }
-cleanup() { for p in $DEMO $API $OR1 $OR2; do kill "$p" 2>/dev/null; done; wait 2>/dev/null; rm -rf "$W"; }
+cleanup() { if (( FAIL )); then tail -n 20 "$W/demo.log" "$W/api.log"; fi; for p in $DEMO $API $OR1 $OR2; do kill "$p" 2>/dev/null; done; wait 2>/dev/null; rm -rf "$W"; }
 trap cleanup EXIT
 CT="--connect-to ejemplo.com:$HP:127.0.0.1:$HP"; B="http://ejemplo.com:$HP"
 H() { curl -s -o /dev/null -w '%{http_code}' $CT "$@"; }
@@ -24,7 +24,8 @@ check "API: /api/cache/config sin credencial = 401" '[ "$(curl -s -o /dev/null -
 
 ZC_CONFIG_URL=http://127.0.0.1:$AP ZC_CONFIG_TOKEN=$KEY ZC_ZONE=cr ZC_CACHE_DIR="$W/cache" ZC_HTTP_PORT=$HP \
 ZC_COOKIE_SECURE=0 ZC_LOGIN_MODE=local "$BIN" >"$W/demo.log" 2>&1 & DEMO=$!
-for _ in $(seq 50); do curl -s -o /dev/null "http://127.0.0.1:$HP/" && break; sleep 0.1; done
+for _ in $(seq 50); do curl -fsS -o /dev/null "http://127.0.0.1:$HP/__zc/healthz" 2>/dev/null && break; sleep 0.1; done
+kill -0 "$DEMO" 2>/dev/null || { cat "$W/demo.log"; exit 1; }
 check "la caché cargó la config del API real"       'curl -s -H "Host: ejemplo.com" "http://127.0.0.1:$HP/__zc/login?return_to=%2Fprivado%2Fa.txt" | grep -q csrf'
 check "dominio sin verificar (pendiente.com) = 404" '[ "$(curl -s -o /dev/null -w %{http_code} -H "Host: pendiente.com" http://127.0.0.1:$HP/)" = 404 ]'
 check "público 1a vez = MISS"                       'curl -s -D - -o /dev/null $CT $B/index.html | grep -q "X-Cache: MISS"'

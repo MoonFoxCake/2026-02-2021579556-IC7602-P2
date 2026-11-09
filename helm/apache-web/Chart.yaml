@@ -1,0 +1,6 @@
+apiVersion: v2
+name: apache-web
+description: Apache HTML origin for IC7602 P2
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

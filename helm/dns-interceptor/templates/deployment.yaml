@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dns.fullname" . }}
+  labels: {{- include "dns.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "dns.labels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "dns.labels" . | nindent 8 }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: dns-interceptor
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["--port", "5353"]
+          env:
+            - name: DNS_API_URL
+              value: {{ required "api.url must point to the Node API" .Values.api.url | quote }}
+          ports:
+            - name: dns
+              containerPort: 5353
+              protocol: UDP
+          readinessProbe:
+            exec:
+              command: ["/bin/sh", "-c", "kill -0 1"]
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["/bin/sh", "-c", "kill -0 1"]
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources: {{- toYaml .Values.resources | nindent 12 }}

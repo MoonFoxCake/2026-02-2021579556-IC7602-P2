@@ -23,7 +23,8 @@ COPY tools ./tools
 COPY tests ./tests
 COPY scripts ./scripts
 # Las pruebas unitarias corren dentro del build: si fallan, no hay imagen.
-RUN make clean && make zonal-cache && make test
+RUN find scripts tests -name '*.sh' -exec sed -i 's/\r$//' {} + \
+ && make clean && make zonal-cache && make test
 
 FROM ${BASE_IMAGE}
 ARG RUNTIME_PKGS

@@ -9,7 +9,7 @@ unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy; export 
 cd "$(dirname "$0")/.."
 W=$(mktemp -d /tmp/zc_e2e.XXXX)
 BIN=${ZC_BIN:-./zonal-cache}
-HP=18080; SP=18443; MP=19900; OP=19810
+HP=${ZC_E2E_HTTP_PORT:-18380}; SP=18443; MP=19900; OP=19810
 TOKEN=token-de-la-cache; SECRET=secreto-compartido-de-pruebas-0123456789
 CT="--connect-to ejemplo.com:$HP:127.0.0.1:$HP --connect-to ejemplo.com:$SP:127.0.0.1:$SP"
 OK=0; FAIL=0; DEMO=; MOCK=; ORIG=

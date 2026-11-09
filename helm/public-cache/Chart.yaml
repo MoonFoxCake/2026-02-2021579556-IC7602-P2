@@ -1,0 +1,5 @@
+apiVersion: v2
+name: public-cache
+description: Cloudflare tunnel and authenticated gateway to the existing zonal caches
+type: application
+version: 0.1.0

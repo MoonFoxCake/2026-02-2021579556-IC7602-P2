@@ -12,6 +12,7 @@
     "ip-country:import": "node scripts/import-ip-country.js",
     "ip-country:dbip": "node scripts/import-dbip.js",
     "test:k8s-handoff": "node scripts/test-k8s-handoff.js",
+    "test:external-http": "node scripts/test-external-http.js",
     "test": "node --test test/cache-routes.test.js test/dns-routes.test.js test/ip-country.test.js test/cache-login.test.js test/auth.test.js test/domains.test.js test/urls.test.js test/firebase.test.js test/cache-test.test.js"
   },
   "engines": {

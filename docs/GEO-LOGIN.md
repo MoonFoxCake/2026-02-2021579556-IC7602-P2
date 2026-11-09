@@ -72,7 +72,7 @@ ZC_TICKET_SECRET=<mismo-secreto-que-TICKET_SECRET>
 
 Con cookies Secure, una petición HTTP al recurso protegido primero se redirige al mismo recurso por HTTPS (puerto 443); desde allí inicia el handoff. Así el callback y la sesión posterior usan TLS. El modo de laboratorio con `ZC_COOKIE_SECURE=0` conserva el comportamiento HTTP anterior.
 
-`/__zc/logout` revoca la sesión. El modo `local` permanece para el demo Compose y su panel `/api/cache-test`; ese panel necesita un destino alcanzable por el API y no se habilita con las IP privadas WSL desde Vercel.
+`/__zc/logout` revoca la sesión. El modo `local` permanece para el demo Compose. El panel `/api/cache-test` admite ese formulario y el modo `ui` con tickets firmados. En producción usa destinos fijos CR/US a través de un gateway Cloudflare alcanzable desde Vercel, según [PUBLIC-CACHE.md](PUBLIC-CACHE.md); las IP privadas WSL por sí solas no bastan.
 
 ## Pruebas reproducibles
 
@@ -95,15 +95,15 @@ HANDOFF_TEST_EXPIRY=1
 
 En un navegador, abrir el recurso protegido debe mostrar la UI externa; probar contraseña incorrecta, acceso correcto, recarga y `https://<dominio>/__zc/logout?return_to=/index.html`. El retorno debe volver a pedir credenciales. El navegador tiene que poder resolver y alcanzar la IP zonal; Vercel no necesita conectarse de vuelta a la caché durante este handoff.
 
-El entorno WSL sigue siendo privado y usa certificados autofirmados. La prueba con `geo.test` usa un fixture verificado existente y resolución aislada en el navegador. No demuestra propiedad TXT pública ni disponibilidad del cluster desde Internet.
+La prueba inicial con `geo.test` usó un fixture verificado existente, resolución aislada y certificados de desarrollo. Después se añadieron dominios con TXT público y Cloudflare Tunnel: el navegador valida el certificado público de Cloudflare y el conector valida el certificado interno fijado de la caché. El DNS Interceptor UDP sigue siendo privado. Véase [PUBLIC-CACHE.md](PUBLIC-CACHE.md).
 
 ## Resultado del 9 de noviembre de 2026
 
 | Comprobación | Resultado |
 |---|---|
-| API Node.js | 66 pruebas aprobadas |
+| API Node.js | 69 pruebas aprobadas, incluido el panel multizona |
 | Caché C (`make test`, también dentro de la imagen) | 345 comprobaciones aprobadas |
-| Frontend | Typecheck, lint y build correctos; 2 pruebas de routing aprobadas |
+| Frontend | Typecheck, lint y build correctos; 4 pruebas de routing aprobadas |
 | Tabla real RTDB | 362,998 nodos; metadata/checksum verificados; 14 límites de países y 4 direcciones desconocidas/inválidas comprobados |
 | Enrutamiento | API: US→US, CR→CR, IP privada→zona por defecto; interceptor DNS real→IP CR |
 | Handoff real | 12 comprobaciones en CR, incluida expiración; 11 en US |
@@ -111,4 +111,4 @@ El entorno WSL sigue siendo privado y usa certificados autofirmados. La prueba c
 | HTTP/HTTPS | Ambas zonas: HTTP protegido→HTTPS→UI; sesiones con cookie Secure |
 | Limpieza | Regla/usuario temporales y fixtures provisionales Firestore eliminados; configuración limpia confirmada en ambas cachés; archivos temporales de credenciales y forwarder eliminados |
 
-Los servicios quedaron Ready y los PVC Bound. Los cambios de código permanecen sin commit/push; los despliegues Vercel se hicieron mediante CLI. Sincronice estos cambios con Git antes del siguiente deployment automático para evitar que una versión anterior reemplace esta implementación.
+Los servicios quedaron Ready y los PVC Bound. La validación inicial de Vercel se publicó mediante CLI. Para las siguientes versiones, integre los cambios en la rama de producción y sincronice el repositorio vinculado a Vercel antes del deployment automático, para evitar que una versión anterior reemplace esta implementación.

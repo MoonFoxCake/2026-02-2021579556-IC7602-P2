@@ -1,0 +1,16 @@
+# Compose >=2.24.4: keep the validation stack private and avoid collisions with the running demo.
+services:
+  firestore-emulator:
+    ports: !override []
+  api-nodejs:
+    ports: !override []
+  frontend:
+    ports: !override []
+  rest-api-java:
+    ports: !override []
+  apache-web:
+    ports: !override []
+  zonal-cache:
+    ports: !override []
+  dns-interceptor:
+    ports: !override []

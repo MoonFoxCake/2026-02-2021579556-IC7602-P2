@@ -25,6 +25,8 @@ export function CacheTestPage({ signedIn, onUnauthorized }: Props) {
   const [urlId, setUrlId] = useState('')
   const [host, setHost] = useState('')
   const [path, setPath] = useState('/index.html')
+  const [zones, setZones] = useState<string[]>([])
+  const [zone, setZone] = useState('')
   const [enabled, setEnabled] = useState<boolean | null>(null)
   const [loading, setLoading] = useState(true)
   const [attempt, setAttempt] = useState(0)
@@ -42,6 +44,8 @@ export function CacheTestPage({ signedIn, onUnauthorized }: Props) {
     void Promise.all([api.listDomains(), api.cacheTestStatus()]).then(([items, status]) => {
       if (!active) return
       const verified = items.filter((item) => item.verified)
+      setZones(status.zones || [])
+      setZone((current) => status.zones?.includes(current) ? current : status.zones?.[0] || '')
       setDomains(verified); setDomain((current) => verified.some((item) => item.domain === current) ? current : verified[0]?.domain || ''); setEnabled(status.enabled)
     }).catch((error: unknown) => {
       if (!active) return
@@ -91,7 +95,7 @@ export function CacheTestPage({ signedIn, onUnauthorized }: Props) {
       }
       const outcomes: string[] = []
       for (let i = 0; i < (twice ? 2 : 1); i++) {
-        const result = await api.testCache({ urlId, host, path: target, ...(selected?.authType === 'apikey' && apiKey ? { apiKey } : {}) })
+        const result = await api.testCache({ urlId, host, path: target, zone, ...(selected?.authType === 'apikey' && apiKey ? { apiKey } : {}) })
         setResults((current) => [{ ...result, id: crypto.randomUUID(), host, path: target, time: new Date().toLocaleTimeString() }, ...current].slice(0, 10))
         if (result.requiresLogin) { setMessage({ error: true, text: 'La caché requiere iniciar sesión para este recurso.' }); return }
         if (result.status >= 400) { setMessage({ error: true, text: `El recurso respondió HTTP ${result.status}. Revisa las credenciales, la ruta y el origen.` }); return }
@@ -104,7 +108,7 @@ export function CacheTestPage({ signedIn, onUnauthorized }: Props) {
   async function authenticate(logout = false) {
     setBusy(true); setMessage(null)
     try {
-      const input = { urlId, host, path }
+      const input = { urlId, host, path, zone }
       if (logout) {
         await api.logoutCache(input)
         setMessage({ error: false, text: 'Sesión de caché cerrada. Puedes solicitar el recurso otra vez para comprobarlo.' })
@@ -122,6 +126,7 @@ export function CacheTestPage({ signedIn, onUnauthorized }: Props) {
       <p className="text-sm leading-6 text-slate-600">Selecciona una regla y solicita un recurso para ver la respuesta real de la caché. Los cambios de configuración pueden tardar unos segundos.</p>
       {loading && <p role="status">Cargando dominios…</p>}
       {enabled === false && <p role="status" className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">Este entorno no tiene una caché de prueba disponible.</p>}
+      <label className="grid gap-2 text-sm font-medium">Zona de caché<select className="control" disabled={busy || loading || !zones.length} value={zone} onChange={(event) => { setZone(event.target.value); setResults([]); setMessage(null); setPassword('') }}>{zones.map((item) => <option key={item} value={item}>{item.toUpperCase()}</option>)}</select></label>
       {!loading && domains.length === 0 && !message?.error && <p className="text-sm text-slate-500">Necesitas un dominio verificado y una regla. El entorno local incluye p2.test.</p>}
       <label className="grid gap-2 text-sm font-medium">Dominio<select className="control" disabled={busy || loading} value={domain} onChange={(event) => { setDomain(event.target.value); setRules([]); setUrlId(''); setApiKey(''); setPassword(''); setResults([]); setMessage(null) }}>{domains.map((item) => <option key={item.domain}>{item.domain}</option>)}</select></label>
       <label className="grid gap-2 text-sm font-medium">Regla de caché<select className="control" disabled={busy || !rules.length} value={urlId} onChange={(event) => selectRule(event.target.value)}>{rules.map((rule) => <option key={rule.id} value={rule.id}>{rule.pattern} · {rule.authType}</option>)}</select></label>

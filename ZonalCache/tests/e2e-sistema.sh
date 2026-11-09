@@ -7,7 +7,7 @@
 #   curl ──HTTP──> Zonal Cache "cr" (127.0.0.2) o "us" (127.0.0.3)  ── config ──> API Node.js
 #                   └─ MISS ──> origen real (tests/origin.mjs, hace de Apache / REST API)
 #
-# El país del cliente sale de IP_COUNTRY_RANGES: 127.0.0.1 = CR y 127.0.0.5 = US (dig -b elige la IP de origen).
+# El adaptador de países del fixture aislado asigna 127.0.0.1 = CR y 127.0.0.5 = US (dig -b).
 # Uso: make e2e-sistema   (requiere dig [dnsutils], node, curl y "npm install" en api-nodejs)
 set -uo pipefail
 unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy; export NO_PROXY="*" no_proxy="*"
@@ -22,13 +22,13 @@ OK=0; FAIL=0; PIDS=()
 check() { if (set +o pipefail; eval "$2"); then OK=$((OK+1)); echo "  ok   $1"; else FAIL=$((FAIL+1)); echo "  FALLO $1"; fi; }
 cleanup() { for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null; done; wait 2>/dev/null; rm -rf "$W"; }
 trap cleanup EXIT
-wait_url() { for _ in $(seq 80); do curl -s -o /dev/null "$1" && return 0; sleep 0.1; done; echo "no arrancó: $1"; return 1; }
+wait_url() { for _ in $(seq 80); do curl -fsS -o /dev/null "$1" 2>/dev/null && return 0; sleep 0.1; done; echo "no arrancó: $1"; return 1; }
 
 gcc -O2 ../Interceptor/dns.c -o "$W/dns" -lcurl -lpthread || { echo "no compila dns.c"; exit 1; }
 ORIGIN_PORT=$OW ORIGIN_NAME=web  node tests/origin.mjs >"$W/ow.log" 2>&1 & PIDS+=($!)
 ORIGIN_PORT=$OJ ORIGIN_NAME=java node tests/origin.mjs >"$W/oj.log" 2>&1 & PIDS+=($!)
 ZONE_CACHES="cr=127.0.0.2,us=127.0.0.3" COUNTRY_ZONES="CR=cr,PA=cr,*=us" \
-IP_COUNTRY_RANGES="127.0.0.1/32=CR,127.0.0.5/32=US" DNS_RECORD_TTL=30 \
+DNS_RECORD_TTL=30 \
 ORIGIN_WEB=http://127.0.0.1:$OW ORIGIN_JAVA=http://127.0.0.1:$OJ SERVICE_KEY=$KEY PORT=$AP \
   node "$API_DIR/test/serve-memory.js" >"$W/api.log" 2>&1 & PIDS+=($!)
 wait_url http://127.0.0.1:$AP/ || exit 1
@@ -43,12 +43,13 @@ sleep 0.5
 
 DIG() { dig +short +tries=1 +time=3 -p $DP @127.0.0.1 "$@" | tail -1; }
 echo "== 1. DNS Interceptor elige la caché zonal por país (IP to Country)"
-IP_CR=$(DIG ejemplo.com)
+IP_CR=$(DIG -b 127.0.0.1 ejemplo.com)
 IP_US=$(DIG -b 127.0.0.5 ejemplo.com)
+echo "DNS answers: CR=$IP_CR US=$IP_US"
 check "cliente de CR (127.0.0.1) -> caché cr 127.0.0.2"   '[ "$IP_CR" = 127.0.0.2 ]'
 check "cliente de US (127.0.0.5) -> caché us 127.0.0.3"   '[ "$IP_US" = 127.0.0.3 ]'
 check "dominio sin verificar TXT: el API da 404 (fallback)" 'DIG pendiente.com >/dev/null; sleep 0.3; grep -q "pendiente.com 404" "$W/dns.log"'
-check "el API recibió la IP real del cliente (sourceIp)"   'curl -s "http://127.0.0.1:$AP/api/records/ejemplo.com?sourceIp=127.0.0.5" | grep -q "\"countryCode\":\"US\""'
+check "el API recibió ambas IP originales desde el interceptor" 'curl -fsS "http://127.0.0.1:$AP/test/dns-requests" | node -e '\''let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const rows=JSON.parse(s);if(!["127.0.0.1","127.0.0.5"].every(ip=>rows.some(r=>r.hostname==="ejemplo.com"&&r.sourceIp===ip)))process.exit(1)})'\'''
 
 echo "== 2. El cliente usa la IP que dio el DNS (Host: ejemplo.com)"
 R() { curl -s -D - -o /dev/null --resolve "ejemplo.com:$ZP:$1" "http://ejemplo.com:$ZP$2" "${@:3}" | tr -d '\r'; }

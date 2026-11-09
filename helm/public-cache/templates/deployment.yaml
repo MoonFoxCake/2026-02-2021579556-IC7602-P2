@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: public-cache
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: public-cache }
+  template:
+    metadata:
+      labels: { app: public-cache }
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: cloudflared
+          image: {{ .Values.cloudflaredImage }}
+          args: [tunnel, --no-autoupdate, --config, /etc/cloudflared/config.yml, run]
+          securityContext:
+            runAsUser: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          ports: [{ name: metrics, containerPort: 2000 }]
+          readinessProbe:
+            httpGet: { path: /ready, port: metrics }
+            periodSeconds: 5
+          volumeMounts:
+            - { name: tunnel-config, mountPath: /etc/cloudflared, readOnly: true }
+            - { name: tunnel-credentials, mountPath: /etc/tunnel, readOnly: true }
+            - { name: cache-ca, mountPath: /etc/cache-ca, readOnly: true }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 256Mi }
+        - name: gateway
+          image: {{ .Values.nginxImage }}
+          command: [nginx]
+          args: [-g, "daemon off;"]
+          securityContext:
+            runAsUser: 101
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          ports: [{ name: gateway, containerPort: 8080 }]
+          readinessProbe:
+            httpGet: { path: /healthz, port: gateway }
+            periodSeconds: 5
+          volumeMounts:
+            - { name: gateway-config, mountPath: /etc/nginx/conf.d, readOnly: true }
+            - { name: cache-ca, mountPath: /etc/cache-ca, readOnly: true }
+            - { name: nginx-tmp, mountPath: /tmp }
+          resources:
+            requests: { cpu: 25m, memory: 16Mi }
+            limits: { memory: 64Mi }
+      volumes:
+        - name: tunnel-config
+          configMap: { name: public-cache-config }
+        - name: tunnel-credentials
+          secret: { secretName: {{ .Values.tunnelSecret }} }
+        - name: gateway-config
+          secret: { secretName: {{ .Values.gatewaySecret }} }
+        - name: cache-ca
+          secret:
+            secretName: {{ .Values.cacheTlsSecret }}
+            items: [{ key: tls.crt, path: tls.crt }]
+        - name: nginx-tmp
+          emptyDir: {}

@@ -21,6 +21,10 @@ Guía de instalación, comprobaciones y solución de problemas: [docs/KUBERNETES
 
 IP-to-Country reutiliza el esquema y la consulta indexada del P1 en Realtime Database. El login externo está en `/cache-login` y autentica usuarios de las reglas de URL almacenados en Firestore. Configuración, importación y pruebas: [docs/GEO-LOGIN.md](docs/GEO-LOGIN.md).
 
+La UI de producción puede consultar las cachés CR/US de WSL mediante Cloudflare Tunnel y un gateway autenticado. Dominios, variables, pruebas del panel y pasos para repetir la demostración: [docs/PUBLIC-CACHE.md](docs/PUBLIC-CACHE.md).
+
+Pruebas completas, preservación de IP de origen en DNS y sitio externo HTTP real: [docs/TECHNICAL-VALIDATION.md](docs/TECHNICAL-VALIDATION.md).
+
 ## Compose local
 
 Con Docker Compose v2, coloque la cuenta de servicio en `secrets/firebase-service-account.json` (ya preparada en este equipo) y ejecute desde la raíz:

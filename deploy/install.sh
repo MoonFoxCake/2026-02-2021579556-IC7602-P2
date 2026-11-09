@@ -22,8 +22,8 @@ TLS_CN=${TLS_CN:-ejemplo.com}
 ZC_LOGIN_MODE=${ZC_LOGIN_MODE:-local}
 ZC_TICKET_SECRET=${ZC_TICKET_SECRET:-}
 
-if [[ "$ZC_LOGIN_MODE" == "ui" && ${#ZC_TICKET_SECRET} -lt 16 ]]; then
-  echo "ZC_LOGIN_MODE=ui requiere ZC_TICKET_SECRET de al menos 16 caracteres." >&2
+if [[ "$ZC_LOGIN_MODE" == "ui" && ${#ZC_TICKET_SECRET} -lt 32 ]]; then
+  echo "ZC_LOGIN_MODE=ui requiere ZC_TICKET_SECRET de al menos 32 caracteres." >&2
   exit 1
 fi
 
@@ -59,11 +59,16 @@ CR_IP=$(kubectl -n "$NAMESPACE" get svc zc-cr -o jsonpath='{.status.loadBalancer
 US_IP=$(kubectl -n "$NAMESPACE" get svc zc-us -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
 DNS_IP=$(kubectl -n "$NAMESPACE" get svc dns-interceptor -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
 echo
-echo "Minikube workloads are installed. Keep 'minikube tunnel' running for LoadBalancer IPs."
+echo "Minikube workloads are installed. Keep the selected LoadBalancer provider available (tunnel or MetalLB, not both)."
 if [[ -n "$CR_IP" && -n "$US_IP" && -n "$DNS_IP" ]]; then
+  if [[ "$CR_IP" == "$US_IP" || "$CR_IP" == 127.* || "$US_IP" == 127.* || "$DNS_IP" == 127.* ]]; then
+    echo "Las zonas necesitan IP distintas y alcanzables; localhost no sirve como destino zonal."
+    echo "En WSL configure MetalLB: docs/WSL-DEPLOYMENT.md. No copie estas IP a Vercel."
+    exit 1
+  fi
   echo "Vercel API setting (save and redeploy): ZONE_CACHES=cr=$CR_IP,us=$US_IP"
   echo "DNS Interceptor address: $DNS_IP"
   echo "Then verify DNS with: nslookup <verified-domain> $DNS_IP"
 else
-  echo "LoadBalancer addresses are pending. Check 'minikube tunnel' and run this installer again."
+  echo "LoadBalancer addresses are pending. Check the tunnel or MetalLB configuration and run this installer again."
 fi

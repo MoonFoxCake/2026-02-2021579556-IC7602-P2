@@ -1,0 +1,10 @@
+{
+  "ipToCountry": {
+    "prueba-google": { "ipFrom": 134744064, "ipTo": 134744319, "countryCode": "US", "countryName": "United States (simulated)" },
+    "prueba-private-10": { "ipFrom": 167772160, "ipTo": 184549375, "countryCode": "CR", "countryName": "Costa Rica (local test)" },
+    "prueba-loopback": { "ipFrom": 2130706432, "ipTo": 2147483647, "countryCode": "CR", "countryName": "Costa Rica (local test)" },
+    "prueba-private-172": { "ipFrom": 2886729728, "ipTo": 2887778303, "countryCode": "CR", "countryName": "Costa Rica (local test)" },
+    "prueba-private-192": { "ipFrom": 3232235520, "ipTo": 3232301055, "countryCode": "CR", "countryName": "Costa Rica (local test)" }
+  },
+  "metadata": { "provider": "P1 interceptor-test-data.json", "edition": "simulated-ipv4", "attribution": "Five simulated P1 ranges for integration tests. Not a full IPv4 country dataset." }
+}

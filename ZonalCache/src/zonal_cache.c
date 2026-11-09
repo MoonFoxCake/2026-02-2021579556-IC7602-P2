@@ -444,7 +444,7 @@ static void handle(conn_t *c) {
 
     if (g.action == ZC_GATE_RESPOND) {
         send_resp(c, g.status, g.content_type, g.headers, g.body, g.body_len, head_only);
-        printf("%s %s %s%s -> %d (gate) %.1fms\n", c->ip, r.method, r.host, r.target, g.status, ms_since(&t0));
+        printf("%s %s %s%s -> %d (gate) %.1fms\n", c->ip, r.method, r.host, path, g.status, ms_since(&t0));
         goto done;
     }
 

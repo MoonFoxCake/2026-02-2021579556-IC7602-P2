@@ -9,8 +9,8 @@
 
 ## Preparar configuración
 
-1. Desplegar el API Node.js y la UI en Vercel. El API necesita sus variables Firebase, `JWT_SECRET`, `SERVICE_KEY`, `ZONE_CACHES`, `COUNTRY_ZONES` e `IP_COUNTRY_RANGES`. `SERVICE_KEY` debe ser igual a `ZC_CONFIG_TOKEN`.
-2. Copiar `ZonalCache/.env.example` como `ZonalCache/.env`. Llenar `ZC_CONFIG_URL` con la URL base del API Vercel y `ZC_CONFIG_TOKEN` con el valor del servicio. Mantener `ZC_LOGIN_MODE=local`: el panel de pruebas de la UI reutiliza ese login nativo. La redirección externa con tickets (`ui`) es un flujo diferente que sigue pendiente.
+1. Desplegar el API Node.js y la UI en Vercel. El API necesita sus variables Firebase, `FIREBASE_DATABASE_URL`, `JWT_SECRET`, `SERVICE_KEY`, `TICKET_SECRET`, `ZONE_CACHES` y `COUNTRY_ZONES`. `SERVICE_KEY` debe ser igual a `ZC_CONFIG_TOKEN`. Importar DB-IP en Realtime Database según [GEO-LOGIN.md](GEO-LOGIN.md).
+2. Copiar `ZonalCache/.env.example` como `ZonalCache/.env`. Llenar `ZC_CONFIG_URL` y `ZC_CONFIG_TOKEN`. Para el login externo, usar `ZC_LOGIN_MODE=ui`, `ZC_LOGIN_UI_URL=https://<ui>/cache-login` y `ZC_TICKET_SECRET` igual a `TICKET_SECRET` (al menos 32 caracteres). El modo `local` sigue disponible para el panel de pruebas de Compose.
 3. `DNS_API_URL` puede quedar vacío para usar la misma URL que `ZC_CONFIG_URL`.
 4. Verificar que la URL de la UI está permitida en `CORS_ORIGINS` del API Vercel.
 
@@ -18,13 +18,15 @@ Los archivos `.env` están ignorados por Git. No se pasan secretos como argument
 
 ## Instalar en Minikube
 
+En Windows/WSL, el túnel del driver Docker puede asignar `127.0.0.1` a todos los servicios. Eso no permite distinguir las zonas en DNS. Para el despliegue WSL validado, use [WSL-DEPLOYMENT.md](WSL-DEPLOYMENT.md): configura MetalLB con IP distintas. Cuando use MetalLB, no ejecute `minikube tunnel` al mismo tiempo.
+
 1. `minikube start`.
-2. Iniciar `minikube tunnel` en otra terminal y mantenerla abierta. En Windows, abrir la terminal con los permisos que Minikube requiera para rutas LoadBalancer.
+2. En WSL usar MetalLB. Si el proveedor elegido es un túnel, iniciar `minikube tunnel` en otra terminal y mantenerla abierta con los permisos necesarios.
 3. Desde la raíz del repo: `bash deploy/install.sh`.
 
 El script compila/carga las imágenes en Minikube y aplica Helm para Java, Apache, Zonal Cache (cada zona configurada en `ZonalCache/.env`) y DNS Interceptor. Espera los Deployments y muestra las IP/estado de los Services.
 
-Después de asignarse las IP de `zc-cr` y `zc-us`, actualice manualmente `ZONE_CACHES` en el proyecto API de Vercel con el mapeo que imprimió el instalador, por ejemplo `cr=<IP-zc-cr>,us=<IP-zc-us>`. Configure `COUNTRY_ZONES` para mapear los países a esas zonas. Si `IP_COUNTRY_RANGES` no cubre el origen del cliente de prueba, agregue el rango correspondiente. Vercel publicará los cambios desde su flujo de deployment actual.
+Después de asignarse las IP de `zc-cr` y `zc-us`, actualice `ZONE_CACHES` en Vercel, por ejemplo `cr=<IP-zc-cr>,us=<IP-zc-us>`. Configure `COUNTRY_ZONES` para mapear países a zonas y `*` para direcciones desconocidas o privadas. El país sale de DB-IP, sin rangos CIDR en variables de entorno. Vuelva a desplegar el API para aplicar cambios.
 
 El DNS devuelve una dirección IP, no un puerto; por eso cada caché necesita su propio endpoint en 80/443. Los Charts usan LoadBalancer para ese requisito. El API de Firestore debe tener al menos un dominio verificado con TXT y sus URLs de prueba configuradas antes del smoke test final.
 

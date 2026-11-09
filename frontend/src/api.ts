@@ -25,7 +25,7 @@ export type CacheTestResult = { status: number; elapsedMs: number; headers: Reco
 
 let token: string | null = null
 
-async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+async function request<T>(path: string, method = 'GET', body?: unknown, account = true): Promise<T> {
   let response: Response
   try {
     response = await fetch(`${apiBase}${path}`, {
@@ -33,7 +33,7 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
       credentials: 'include',
       headers: {
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(account && token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     })
@@ -41,7 +41,7 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
     throw new ApiError('No se pudo conectar con la Node API. Revisa VITE_API_BASE_URL y CORS.')
   }
 
-  if (response.status === 401) token = null
+  if (account && response.status === 401) token = null
   if (!response.ok) {
     let message = `La API respondió con el estado ${response.status}.`
     try {
@@ -63,6 +63,7 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
 }
 
 export const api = {
+  authorizeCache: (input: { domain: string; pattern: string; callback: string; returnTo: string; username: string; password: string }) => request<{ redirectUrl: string }>('/cache-login', 'POST', input, false),
   cacheTestStatus: () => request<{ enabled: boolean }>('/cache-test/status'),
   testCache: (input: CacheTestInput & { apiKey?: string }) => request<CacheTestResult>('/cache-test/request', 'POST', input),
   loginCache: (input: CacheTestInput & { username: string; password: string }) => request<{ authenticated: boolean; status: number; message: string }>('/cache-test/login', 'POST', input),

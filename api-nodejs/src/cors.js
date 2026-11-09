@@ -17,6 +17,7 @@ function cors({ env = process.env } = {}) {
     const allowed = String(env.CORS_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
     if (origin && allowed.includes(origin)) {
       res.set('Access-Control-Allow-Origin', origin);
+      res.set('Access-Control-Allow-Credentials', 'true');
       res.set('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
       res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
       res.set('Access-Control-Max-Age', '600');

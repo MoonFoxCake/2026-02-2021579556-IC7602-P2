@@ -19,7 +19,20 @@ El servicio `local-seed` espera al emulador y crea, sin sobrescribir documentos 
 - La regla `/*`, origen `http://apache-web:8080`, archivos HTML, TTL 30 s.
 - La regla `/api/*`, origen `http://rest-api-java:8080`, archivos JSON, TTL 30 s.
 
-Las reglas iniciales son públicas (`authType=none`). Desde la UI se pueden crear cuentas y modificar reglas, políticas, claves y usuarios. Otros dominios continúan exigiendo TXT real: el seed no desactiva la verificación del API. El login de la caché usa su formulario local; la pantalla de login/ticket de caché en la UI sigue pendiente.
+Las reglas iniciales son públicas (`authType=none`). Desde la UI se pueden crear cuentas y modificar reglas, políticas, claves y usuarios. Otros dominios continúan exigiendo TXT real: el seed no desactiva la verificación del API. La pestaña **Acceso a caché** permite probar recursos y autenticación mediante el formulario local de la caché, sin editar hosts ni configurar DNS en el navegador.
+
+## Probar la caché desde la UI
+
+1. Inicie sesión y abra **Acceso a caché**.
+2. Seleccione `p2.test` y la regla `/*`. La ruta inicial es `/index.html`; para `/api/*`, use `/api/items.json`.
+3. Pulse **Probar MISS → HIT**. El panel agrega una consulta única y envía dos GET a la misma URL. Los resultados más recientes aparecen primero y muestran estado HTTP, HIT/MISS/BYPASS, tiempo API→caché, zona, regla aplicada, política, TTL, encabezados y cuerpo como texto.
+4. Pulse **Enviar solicitud** para repetir la URL actual. Después de su TTL debería volver a mostrar MISS. La prueba doble utiliza una consulta nueva para evitar entradas previas, sin purgar datos.
+5. Para probar una API key: cambie la regla a **API key** en **Reglas de caché**, cree una clave en **Accesos**, vuelva al panel y pulse **Actualizar reglas**. Espere al menos 5 s. Una solicitud sin clave debe dar HTTP 401; con la clave correcta puede ejecutar la prueba doble.
+6. Para usuario/contraseña: cambie la regla a ese modo, cree un usuario en **Accesos** y actualice el panel. Ingrese las credenciales del recurso y pulse **Iniciar sesión en caché**, luego envíe solicitudes. **Cerrar sesión de caché** revoca la sesión real: otra solicitud debería mostrar HTTP 302 y autenticación requerida. La cuenta de administración es independiente.
+
+Los GET pasan por el API hacia el destino fijo `CACHE_TEST_URL=http://zonal-cache:8080`, con el Host del dominio seleccionado. El API exige JWT y propiedad de la regla/dominio; no permite elegir un servidor arbitrario ni seguir redirects. Reutiliza el login CSRF nativo de la caché y guarda la sesión en una cookie HttpOnly aislada por cuenta/regla. No devuelve cookies del origen, contraseñas ni tokens en los resultados; limita la vista del cuerpo a 64 KiB y lo muestra sin ejecutar HTML. Las API keys solo se mantienen en memoria durante esta vista.
+
+El panel requiere `ZC_LOGIN_MODE=local`. El flujo externo de redirección con tickets (`ZC_LOGIN_MODE=ui`) es una integración diferente y no se activa con este panel. Estas pruebas consultan directamente la caché; la prueba DNS del Interceptor sigue en el smoke test.
 
 El emulador es Firestore de Google. Las cuentas del proyecto usan JWT/bcrypt y colecciones Firestore; no necesitan el emulador de Firebase Authentication. El API usa `FIRESTORE_EMULATOR_HOST` sin protocolo y exige un proyecto `demo-`. Compose fija `demo-ic7602-p2`, no carga credenciales del `.env` y no conecta a Firestore hospedado. El seed se niega a ejecutarse sin esas condiciones. La UI pasa `/api/*` por Nginx al API y desactiva las integraciones de telemetría Vercel en su imagen local.
 
@@ -46,7 +59,7 @@ docker compose ps -a
 docker compose run --rm local-smoke
 ```
 
-El smoke test comprueba HTML de la UI, proxy del API, conectividad Firestore, login, dominio inicial, CRUD Java a través de la caché, `MISS`/`HIT` para JSON/HTML, y consulta DNS UDP para `p2.test`. Crea y elimina su propio elemento Java; usa consultas únicas para evitar entradas de caché de ejecuciones anteriores.
+El smoke test comprueba HTML de la UI, proxy del API, conectividad Firestore, login, dominio inicial, CRUD Java a través de la caché, `MISS`/`HIT` para JSON/HTML, y consulta DNS UDP para `p2.test`. También crea un dominio temporal solo en el emulador y verifica API keys, CSRF, login correcto/incorrecto, MISS/HIT autenticados y revocación de sesión mediante el API del panel. Borra sus datos al terminar y no modifica las reglas de `p2.test`.
 
 Pruebas manuales en PowerShell:
 

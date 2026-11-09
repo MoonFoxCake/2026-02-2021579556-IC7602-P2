@@ -89,6 +89,7 @@ async function smoke() {
   console.log('PASS: Java CRUD through cache, cache MISS/HIT and Apache origin');
   await dnsCheck();
   console.log('PASS: Interceptor UDP DNS returns 127.0.0.1 for p2.test');
+  await require('./cache-test-smoke')(request);
 }
 
 smoke().catch((error) => { console.error(error); process.exitCode = 1; });

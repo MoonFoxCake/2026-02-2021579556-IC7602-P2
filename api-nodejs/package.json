@@ -9,7 +9,7 @@
     "dev": "node --watch src/server.js",
     "env:from-json": "node scripts/json-to-env.js",
     "test:firestore": "node scripts/test-firestore.js",
-    "test": "node --test test/cache-routes.test.js test/dns-routes.test.js test/auth.test.js test/domains.test.js test/urls.test.js test/firebase.test.js"
+    "test": "node --test test/cache-routes.test.js test/dns-routes.test.js test/auth.test.js test/domains.test.js test/urls.test.js test/firebase.test.js test/cache-test.test.js"
   },
   "engines": {
     "node": ">=20"

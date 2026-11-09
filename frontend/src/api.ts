@@ -20,6 +20,8 @@ export type ApiKey = { id: string; prefix: string; createdAt: string | null }
 export type CreatedApiKey = ApiKey & { apiKey: string }
 export type UrlUser = { username: string; createdAt: string | null }
 export type UrlRuleInput = Omit<UrlRule, 'id' | 'domain' | 'createdAt'>
+export type CacheTestInput = { urlId: string; host: string; path: string }
+export type CacheTestResult = { status: number; elapsedMs: number; headers: Record<string, string>; body: string; truncated: boolean; requiresLogin: boolean }
 
 let token: string | null = null
 
@@ -28,6 +30,7 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
   try {
     response = await fetch(`${apiBase}${path}`, {
       method,
+      credentials: 'include',
       headers: {
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -60,6 +63,10 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
 }
 
 export const api = {
+  cacheTestStatus: () => request<{ enabled: boolean }>('/cache-test/status'),
+  testCache: (input: CacheTestInput & { apiKey?: string }) => request<CacheTestResult>('/cache-test/request', 'POST', input),
+  loginCache: (input: CacheTestInput & { username: string; password: string }) => request<{ authenticated: boolean; status: number; message: string }>('/cache-test/login', 'POST', input),
+  logoutCache: (input: CacheTestInput) => request<{ authenticated: boolean }>('/cache-test/logout', 'POST', input),
   health: async () => (await request<{ ok: boolean }>('/health')).ok,
   register: (email: string, password: string) => request<Account>('/auth/register', 'POST', { email, password }),
   async login(email: string, password: string): Promise<Session> {

@@ -100,6 +100,9 @@ app.use('/api', createUrlsRouter());
 // Endpoints de servicio para las cachés zonales (config y verificación de credenciales).
 app.use('/api/cache', createCacheRouter({ store }));
 
+const { createCacheTestRouter } = require('./cache-test-routes');
+app.use('/api/cache-test', createCacheTestRouter());
+
 app.use((req, res) => {
   res.status(404).json({ error: 'Ruta no encontrada' });
 });

@@ -21,3 +21,18 @@ La imagen corre sin root, publica el puerto 3000 y excluye env files y claves de
 Variables principales: `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, `JWT_SECRET`, `SERVICE_KEY`, `ZONE_CACHES`, `COUNTRY_ZONES`, `IP_COUNTRY_RANGES` y `CORS_ORIGINS`. Nunca agregue valores secretos a Dockerfile, Compose, Helm values o Git.
 
 La guía de servicios y despliegue Minikube está en [docs/KUBERNETES.md](../docs/KUBERNETES.md). El contrato del API y los modelos Firestore están en [API.md](API.md).
+
+## Panel de pruebas de caché
+
+`CACHE_TEST_URL` configura un destino fijo HTTP/HTTPS, sin ruta ni credenciales, alcanzable desde este API. Compose usa `http://zonal-cache:8080`. Sin esa variable el panel indica que no hay caché disponible. La caché debe usar `ZC_LOGIN_MODE=local`. `CACHE_TEST_COOKIE_SECURE=0` permite HTTP local; por defecto la cookie es Secure y SameSite=None para HTTPS. CORS debe permitir expresamente el origen de la UI y credenciales; navegadores que bloquean cookies de terceros deben usar UI/API bajo el mismo origen.
+
+Todas las rutas `/api/cache-test/*` requieren JWT de administración y devuelven `Cache-Control: no-store`:
+
+| Método y ruta | Entrada / salida |
+|---|---|
+| GET `/status` | `{ enabled }` |
+| POST `/request` | `{ urlId, host, path, apiKey? }` → `{ status, headers, body, truncated, elapsedMs, requiresLogin }` |
+| POST `/login` | `{ urlId, host, path, username, password }` → `{ authenticated, status, message }`, cookie HttpOnly de sesión |
+| POST `/logout` | `{ urlId, host, path }` → revoca la sesión en la caché y borra la cookie |
+
+Se verifica propiedad de la regla y del dominio verificado. Solo se aceptan hosts del dominio y rutas locales no reservadas; se rechazan URLs absolutas, traversal y saltos de línea. El destino nunca viene del cliente. Los GET no siguen redirecciones y devuelven como datos los estados del recurso (incluido 401/302), para no confundirlos con la sesión de administración. Solo se exponen encabezados de contenido/caché, hasta 64 KiB de cuerpo y ninguna credencial. El JWT no se reenvía a la caché. El login reutiliza CSRF/sesiones de GNU C y no introduce un protocolo nuevo de tickets.

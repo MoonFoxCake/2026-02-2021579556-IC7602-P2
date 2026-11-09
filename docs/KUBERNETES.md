@@ -10,7 +10,7 @@
 ## Preparar configuración
 
 1. Desplegar el API Node.js y la UI en Vercel. El API necesita sus variables Firebase, `JWT_SECRET`, `SERVICE_KEY`, `ZONE_CACHES`, `COUNTRY_ZONES` e `IP_COUNTRY_RANGES`. `SERVICE_KEY` debe ser igual a `ZC_CONFIG_TOKEN`.
-2. Copiar `ZonalCache/.env.example` como `ZonalCache/.env`. Llenar `ZC_CONFIG_URL` con la URL base del API Vercel y `ZC_CONFIG_TOKEN` con el valor del servicio. Mantener `ZC_LOGIN_MODE=local`: el formulario/ticket de login servido por la UI todavía está pendiente; `ui` no es un flujo integrado listo para producción.
+2. Copiar `ZonalCache/.env.example` como `ZonalCache/.env`. Llenar `ZC_CONFIG_URL` con la URL base del API Vercel y `ZC_CONFIG_TOKEN` con el valor del servicio. Mantener `ZC_LOGIN_MODE=local`: el panel de pruebas de la UI reutiliza ese login nativo. La redirección externa con tickets (`ui`) es un flujo diferente que sigue pendiente.
 3. `DNS_API_URL` puede quedar vacío para usar la misma URL que `ZC_CONFIG_URL`.
 4. Verificar que la URL de la UI está permitida en `CORS_ORIGINS` del API Vercel.
 

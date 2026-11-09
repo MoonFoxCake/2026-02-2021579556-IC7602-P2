@@ -187,8 +187,8 @@ Con el API real (sección 4) la caché descarga `GET /api/cache/config?zone=<zon
 | Externo HTTPS | `curl -si -H "Host: externo-https.com" http://127.0.0.1:8080/` → `https://example.com` | igual |
 
 ```bash
-curl -s $C -H "x-api-key: clave-demo" -X POST   -d "nombre=bici" $B/api/items.json   # {"method":"POST",...,"body":"nombre=bici"}
-curl -s $C -H "x-api-key: clave-demo" -X PUT    -d "precio=10"  $B/api/items/1.json
+curl -s $C -H "x-api-key: clave-demo" -H "Content-Type: application/json" -X POST --data '{"name":"bike","price":10}' $B/api/items.json
+curl -s $C -H "x-api-key: clave-demo" -H "Content-Type: application/json" -X PUT --data '{"price":12}' $B/api/items/1.json
 curl -s $C -H "x-api-key: clave-demo" -X DELETE                 $B/api/items/1.json
 curl -si -H "Host: externo-https.com" http://127.0.0.1:8080/ | grep -E "^HTTP|X-Cache|<title>"   # 200, MISS, "Example Domain"
 ```
@@ -227,6 +227,19 @@ docker run --rm -p 8080:8080 -e ZC_ZONE=cr \
 ```
 
 ## 6. Kubernetes con Helm (minikube)
+
+Para desplegar juntos el Interceptor, Java REST API, Apache y ambas zonas de caché, use el instalador de la raíz:
+
+```bash
+minikube start
+# Mantener en otra terminal (puede requerir permisos elevados):
+minikube tunnel
+bash deploy/install.sh
+```
+
+El instalador requiere `ZonalCache/.env` (ver `.env.example`) y configura los charts del repo. Después se deben
+copiar las IP de `zc-cr` y `zc-us` que imprime a `ZONE_CACHES` en Vercel; vea [`docs/KUBERNETES.md`](../../docs/KUBERNETES.md)
+para la configuración del API/UI, orígenes internos, DNS y pruebas de sistema.
 
 ```bash
 minikube start
@@ -307,4 +320,4 @@ Valores útiles del chart (`helm/zonal-cache/values.yaml`): `zone`, `config.url`
 - No se acepta `Transfer-Encoding: chunked` del cliente (411) y cada conexión atiende una petición (`Connection: close`).
 - Sesiones en memoria del pod: una réplica por zona (ya configurado en el chart).
 - La imagen y el contenedor se validaron con `docker build`/`docker run`, y las plantillas del chart con un renderizado
-  de prueba; el despliegue completo en minikube debe hacerse en una máquina con acceso a Docker Hub.
+  de prueba. Minikube construye la imagen localmente; para el despliegue integrado siga `docs/KUBERNETES.md`.

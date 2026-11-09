@@ -3,6 +3,7 @@ import { Analytics } from '@vercel/analytics/react'
 import { SpeedInsights } from '@vercel/speed-insights/react'
 import { ApiError, api, type Session } from './api'
 import { AccessPage, DomainsPage, RulesPage } from './ManagementPages'
+import { CacheTestPage } from './CacheTestPage'
 
 type View = 'overview' | 'account' | 'domains' | 'rules' | 'access' | 'cache-login'
 type NoticeState = { tone: 'error' | 'success' | 'info'; text: string }
@@ -73,7 +74,7 @@ export default function App() {
       case 'domains': return <><PageHeading eyebrow="Propiedad y DNS" title="Dominios" description="Registra tus dominios, publica el reto TXT y confirma que el dominio te pertenece." /><DomainsPage key={session?.user.id ?? 'signed-out'} signedIn={!!session} onUnauthorized={onUnauthorized} /></>
       case 'rules': return <><PageHeading eyebrow="URLs y políticas" title="Reglas de caché" description="Define patrones, origen, tamaño de caché, TTL por tipo de archivo y política de reemplazo." /><RulesPage key={session?.user.id ?? 'signed-out'} signedIn={!!session} onUnauthorized={onUnauthorized} /></>
       case 'access': return <><PageHeading eyebrow="Usuarios y claves" title="Accesos por URL" description="Crea y revoca API keys, y administra las cuentas que protegen cada URL." /><AccessPage key={session?.user.id ?? 'signed-out'} signedIn={!!session} onUnauthorized={onUnauthorized} /></>
-      case 'cache-login': return <PendingPage />
+      case 'cache-login': return <><PageHeading eyebrow="Pruebas de recursos" title="Acceso a caché zonal" description="Prueba tus recursos, inicia una sesión de caché y observa HIT, MISS o BYPASS en cada solicitud." /><CacheTestPage key={session?.user.id ?? 'signed-out'} signedIn={!!session} onUnauthorized={onUnauthorized} /></>
       default: return <OverviewPage session={session} apiStatus={apiStatus} onNavigate={setView} />
     }
   })()
@@ -84,14 +85,14 @@ export default function App() {
       <nav aria-label="Navegación principal" className="flex gap-1 overflow-x-auto px-3 pb-3 lg:flex-1 lg:flex-col lg:px-3 lg:py-2">
         {views.map((item) => <button key={item.id} type="button" onClick={() => { setView(item.id); setNotice(null) }} aria-current={view === item.id ? 'page' : undefined} className={`shrink-0 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition focus-visible:outline-2 focus-visible:outline-indigo-600 lg:w-full ${view === item.id ? 'bg-indigo-50 text-indigo-800' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950'}`}><span className="block">{item.label}</span><span className={`hidden text-xs font-normal lg:block ${view === item.id ? 'text-indigo-600' : 'text-slate-400'}`}>{item.detail}</span></button>)}
       </nav>
-      <div className="hidden border-t border-slate-100 p-5 lg:block"><p className="text-xs font-bold uppercase tracking-wider text-slate-400">Node API</p><div className="mt-3"><Status ready={apiStatus === 'available'}>{apiStatus === 'checking' ? 'Comprobando API…' : apiStatus === 'available' ? 'API disponible' : 'API no disponible'}</Status></div><p className="mt-2 text-xs leading-5 text-slate-400">Cuentas, dominios, URLs y credenciales usan rutas de administración. El acceso de usuario a la caché sigue pendiente.</p></div>
+      <div className="hidden border-t border-slate-100 p-5 lg:block"><p className="text-xs font-bold uppercase tracking-wider text-slate-400">Node API</p><div className="mt-3"><Status ready={apiStatus === 'available'}>{apiStatus === 'checking' ? 'Comprobando API…' : apiStatus === 'available' ? 'API disponible' : 'API no disponible'}</Status></div><p className="mt-2 text-xs leading-5 text-slate-400">Cuentas, dominios, URLs y credenciales usan rutas de administración. Acceso a caché permite autenticar recursos y consultar resultados HIT/MISS.</p></div>
     </aside>
 
     <div className="lg:pl-64">
       <header className="flex min-h-16 items-center justify-between gap-4 border-b border-slate-200 bg-white/80 px-5 sm:px-8"><p className="truncate text-xs text-slate-400">Consola / <span className="text-slate-600">{currentView.label}</span></p><div className="flex items-center gap-3">{session ? <><span className="hidden max-w-48 truncate text-sm text-slate-600 sm:inline">{session.user.email}</span><Button type="button" secondary onClick={logout}>Cerrar sesión</Button></> : <Button type="button" onClick={() => { setView('account'); setNotice(null) }}>Iniciar sesión</Button>}</div></header>
       <main className="mx-auto max-w-7xl px-4 py-7 sm:px-8 sm:py-10"><div className="mb-5"><Notice value={notice} /></div>{content}<footer className="mt-12 border-t border-slate-200 pt-5 text-xs text-slate-400">Tecnológico de Costa Rica <span className="px-1">·</span> IC7602 <span className="px-1">·</span> Proyecto 2</footer></main>
     </div>
-    <Analytics /><SpeedInsights />
+    {import.meta.env.VITE_DISABLE_TELEMETRY !== 'true' && <><Analytics /><SpeedInsights /></>}
   </div>
 }
 
@@ -106,11 +107,11 @@ function OverviewPage({ session, apiStatus, onNavigate }: { session: Session | n
           ['Dominios', 'Registro, TXT y verificación', 'domains', 'Disponible'],
           ['Reglas de caché', 'Wildcards, límites, TTL y reemplazo', 'rules', 'Disponible'],
           ['Accesos', 'API keys y usuarios por URL', 'access', 'Disponible'],
-          ['Acceso a caché', 'Autenticación por recurso y entrega de sesión', 'cache-login', 'Contrato pendiente'],
+          ['Acceso a caché', 'Autenticación y resultados HIT/MISS', 'cache-login', 'Disponible'],
         ].map(([title, description, target, state]) => <button key={target} type="button" onClick={() => onNavigate(target as View)} className="flex w-full flex-wrap items-center justify-between gap-3 py-4 text-left first:pt-0 last:pb-0"><span><span className="block text-sm font-semibold text-slate-800">{title}</span><span className="mt-1 block text-xs text-slate-500">{description}</span></span><span className="text-xs font-semibold text-indigo-700">{state} · Abrir</span></button>)}</div>
       </Panel>
       <Panel title="Estado de los servicios" description="Rutas disponibles en el código actual; disponibilidad de despliegue depende de sus entornos.">
-        <div className="space-y-4"><IntegrationRow name="Node API: cuentas" state="Implementada" detail="Registro, login JWT y consulta de identidad." /><IntegrationRow name="Node API: dominios" state="Implementada" detail="Listado, registro, reto TXT, verificación y eliminación." /><IntegrationRow name="Node API: URLs y accesos" state="Implementada" detail="CRUD de URLs, políticas, API keys y usuarios por URL." /><IntegrationRow name="Zonal Cache y DNS Interceptor" state="Rutas de servicio" detail="La caché consume configuración/credenciales y el interceptor consulta /api/records; su despliegue y conectividad deben verificarse." /><IntegrationRow name="Sesión UI a caché zonal" state="Pendiente" detail="No hay endpoint de login de recursos ni protocolo de traspaso de sesión definido para la UI." /></div>
+        <div className="space-y-4"><IntegrationRow name="Node API: cuentas" state="Implementada" detail="Registro, login JWT y consulta de identidad." /><IntegrationRow name="Node API: dominios" state="Implementada" detail="Listado, registro, reto TXT, verificación y eliminación." /><IntegrationRow name="Node API: URLs y accesos" state="Implementada" detail="CRUD de URLs, políticas, API keys y usuarios por URL." /><IntegrationRow name="Zonal Cache y DNS Interceptor" state="Rutas de servicio" detail="La caché consume configuración/credenciales y el interceptor consulta /api/records; su despliegue y conectividad deben verificarse." /><IntegrationRow name="Pruebas UI de caché zonal" state="Implementada" detail="Solicitudes reales, API keys, sesión de recurso, cierre de sesión y resultados HIT/MISS mediante el API configurado." /></div>
       </Panel>
     </div>
   </>
@@ -168,8 +169,4 @@ function AccountPage({ session, onAuthenticated, onApiResponded }: { session: Se
       <p className="mt-5 border-t border-slate-100 pt-4 text-xs leading-5 text-slate-500">Endpoints implementados: POST /api/auth/register, POST /api/auth/login y GET /api/auth/me. El cierre de sesión elimina el JWT localmente; el API no ofrece revocación.</p>
     </Panel>
   </div>
-}
-
-function PendingPage() {
-  return <><PageHeading eyebrow="Autenticación de recursos" title="Acceso a caché zonal" description="El inicio de sesión de una URL protegida es distinto del inicio de sesión de la cuenta de administración." /><div className="mb-5"><Status>Integración pendiente</Status></div><div className="grid gap-5 xl:grid-cols-2"><Panel title="Funciones previstas"><ul className="list-disc space-y-3 pl-5 text-sm leading-6 text-slate-600"><li>Autenticar usuario y contraseña para una URL protegida.</li><li>Entregar una sesión a la caché y permitir verificarla o cerrarla.</li><li>Mantener la sesión dentro del protocolo que acuerden API y caché.</li></ul></Panel><Panel title="Dependencia de API"><p className="text-sm leading-6 text-slate-700">La Node API permite que la caché verifique credenciales de servicio; no define el login de usuarios finales ni un handoff de sesión a la UI.</p><p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">Esta pantalla no envía solicitudes. Requiere que los equipos de API y caché acuerden el protocolo y sus rutas.</p></Panel></div></>
 }

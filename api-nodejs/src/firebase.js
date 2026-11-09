@@ -35,9 +35,20 @@ function readCredentials() {
 // En entornos serverless (Vercel) el modulo puede cargarse varias veces:
 // evitamos inicializar la app mas de una vez.
 if (admin.apps.length === 0) {
-  admin.initializeApp({
-    credential: admin.credential.cert(readCredentials()),
-  });
+  if (process.env.FIRESTORE_EMULATOR_HOST) {
+    const projectId = process.env.FIREBASE_PROJECT_ID;
+    if (!projectId || !projectId.startsWith('demo-')) {
+      throw new Error('El emulador requiere FIREBASE_PROJECT_ID con prefijo demo-');
+    }
+    if (process.env.FIRESTORE_EMULATOR_HOST.includes('://')) {
+      throw new Error('FIRESTORE_EMULATOR_HOST debe ser host:puerto, sin protocolo');
+    }
+    admin.initializeApp({ projectId });
+  } else {
+    admin.initializeApp({
+      credential: admin.credential.cert(readCredentials()),
+    });
+  }
 }
 
 const db = admin.firestore();

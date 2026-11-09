@@ -1,36 +1,17 @@
-
-FROM debian:bookworm-slim AS builder
-
-#compilado
-RUN apt-get update && apt-get install -y \
-    gcc \
-    libcurl4-openssl-dev \
-    make \
+FROM debian:bookworm-slim AS build
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential libcurl4-openssl-dev ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-
-
+WORKDIR /src
 COPY dns.c .
-
-# Compilado
-RUN gcc dns.c -o dns -lcurl -lpthread -O2
+COPY tests ./tests
+RUN gcc -std=gnu11 -O2 -Wall -Wextra -o /dns dns.c -lcurl -lpthread
+RUN sed -i 's/\r$//' tests/test-required-env.sh && bash tests/test-required-env.sh /dns
 
 FROM debian:bookworm-slim
-
-
-RUN apt-get update && apt-get install -y \
-    libcurl4 \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-
-COPY --from=builder /app/dns .
-
-
-
-
-EXPOSE 53/udp
-
-CMD ["./dns"]
+RUN apt-get update && apt-get install -y --no-install-recommends libcurl4 ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 10001 dns
+COPY --from=build /dns /usr/local/bin/dns
+USER 10001
+EXPOSE 5353/udp
+ENTRYPOINT ["/usr/local/bin/dns"]

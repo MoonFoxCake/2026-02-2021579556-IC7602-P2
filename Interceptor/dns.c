@@ -496,7 +496,7 @@ static http_resp_t *http_request(CURL *curl, const char *url, const char *json_b
 
 static char *api_base_url(void) {
     const char *env = getenv("DNS_API_URL");
-    const char *base = (env && *env) ? env : "http://localhost:8080";
+    const char *base = env;
     size_t len = strlen(base);
     while (len > 0 && base[len - 1] == '/') len--;
     char *out = malloc(len + 1);
@@ -876,6 +876,10 @@ static void *thread_main(void *arg) {
 
 int main(int argc, char **argv) {
     load_dotenv(".env");
+    if (!getenv("DNS_API_URL") || !*getenv("DNS_API_URL")) {
+        fprintf(stderr, "DNS_API_URL es obligatorio\n");
+        return 1;
+    }
     uint16_t port = 53;
 
     for (int i = 1; i < argc; i++) {

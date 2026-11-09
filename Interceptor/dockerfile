@@ -1,11 +1,11 @@
 FROM debian:bookworm-slim AS build
-RUN apt-get update && apt-get install -y --no-install-recommends gcc libcurl4-openssl-dev ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential libcurl4-openssl-dev ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY dns.c .
 COPY tests ./tests
 RUN gcc -std=gnu11 -O2 -Wall -Wextra -o /dns dns.c -lcurl -lpthread
-RUN bash tests/test-required-env.sh /dns
+RUN sed -i 's/\r$//' tests/test-required-env.sh && bash tests/test-required-env.sh /dns
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends libcurl4 ca-certificates \

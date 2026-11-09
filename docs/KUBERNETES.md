@@ -63,14 +63,14 @@ La primera lectura cacheable debe indicar `MISS` y la siguiente `HIT`. Para el A
 
 ## Compose local
 
-Compose es para integración local, no reemplaza Vercel ni Helm. Copiar `.env.example` a `.env`, llenar los valores Firebase y secretos recién rotados, y ejecutar:
+Compose ejecuta todos los servicios localmente, incluida la UI y Firestore emulado. No requiere Vercel, Firebase hospedado ni credenciales. Desde la raíz:
 
 ```bash
-docker compose config
-docker compose up --build
+docker compose up --build -d --wait
+docker compose run --rm local-smoke
 ```
 
-Comprobaciones locales: `http://localhost:3000/api/health`, `http://localhost:18080/api/health`, `http://localhost:18081/`; DNS por UDP 5353. La caché se publica en HTTP 80. `ZONE_CACHES` en el env local debe apuntar a `127.0.0.1` para la prueba desde el host. Los orígenes guardados en Firestore pueden conservar los nombres `*.default.svc.cluster.local`; Compose define alias con esos nombres.
+La UI está en http://localhost:5173. Los datos iniciales y las pruebas DNS/cache están documentados en [LOCAL.md](LOCAL.md). El despliegue Kubernetes/Vercel de las secciones anteriores mantiene sus variables y credenciales propias.
 
 ## Pruebas
 

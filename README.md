@@ -19,10 +19,19 @@ Guía de instalación, comprobaciones y solución de problemas: [docs/KUBERNETES
 
 ## Compose local
 
-1. Copie `.env.example` a `.env`; use credenciales Firebase y secretos rotados.
-2. Configure los orígenes de URLs en Firestore para usar los alias locales que también funcionan en Kubernetes: `http://rest-api-java.default.svc.cluster.local:8080` y `http://apache-web.default.svc.cluster.local`.
-3. Inicie los contenedores: `docker compose up --build`.
+Con Docker Desktop en modo Linux, desde la raíz del repo:
 
-La UI permanece en Vercel (o puede ejecutarse para desarrollo con `cd frontend`, `pnpm install --frozen-lockfile`, `pnpm dev`). Compose publica el API en `localhost:3000`, el DNS Interceptor en UDP `5353`, la caché en HTTP `80`, el Java API en `localhost:18080` y Apache en `localhost:18081`.
+```bash
+docker compose up --build -d --wait
+```
+
+Abra http://localhost:5173 e ingrese con `demo@p2.test` / `local-demo-password`. Compose incluye la UI, el API Node.js, el emulador Firestore, el Interceptor, la caché zonal, Java y Apache. No necesita `.env`, credenciales Firebase, Vercel, Helm ni instalaciones locales de Node/Java. La primera construcción descarga imágenes y dependencias; la aplicación usa servicios locales al ejecutarse.
+
+El dominio `p2.test` se crea verificado **solo en el emulador**, con reglas para Apache (`/*`) y Java (`/api/*`). Las cuentas usan el mecanismo JWT/bcrypt del API sobre Firestore; este proyecto no usa Firebase Authentication. Guía con puertos, pruebas, persistencia y diagnóstico: [docs/LOCAL.md](docs/LOCAL.md).
+
+```bash
+docker compose run --rm local-smoke
+docker compose down
+```
 
 Las pruebas locales y manuales de la caché están en [ZonalCache/docs/COMO-CORRER.md](ZonalCache/docs/COMO-CORRER.md). Las variables y el Dockerfile del API están documentados en [api-nodejs/README.md](api-nodejs/README.md).

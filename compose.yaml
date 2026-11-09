@@ -17,8 +17,6 @@ services:
     build: ./deploy/local/firestore
     environment:
       FIREBASE_PROJECT_ID: demo-ic7602-p2
-      CLOUDSDK_CORE_DISABLE_USAGE_REPORTING: "true"
-      CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK: "true"
     ports:
       - "127.0.0.1:18082:8080"
     volumes:
@@ -78,6 +76,12 @@ services:
 
   rest-api-java:
     build: ./rest-api-java
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
     ports:
       - "127.0.0.1:18080:8080"
     networks:
@@ -87,6 +91,11 @@ services:
 
   apache-web:
     build: ./apache-web
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/index.html"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
     ports:
       - "127.0.0.1:18081:8080"
     networks:
@@ -100,9 +109,9 @@ services:
       api-nodejs:
         condition: service_healthy
       rest-api-java:
-        condition: service_started
+        condition: service_healthy
       apache-web:
-        condition: service_started
+        condition: service_healthy
     environment:
       ZC_CONFIG_URL: http://api-nodejs:3000
       ZC_CONFIG_TOKEN: ${LOCAL_SERVICE_KEY:-local-emulator-only-service-key}
@@ -112,6 +121,19 @@ services:
       ZC_CACHE_DIR: /var/cache/zc
       ZC_CONFIG_REFRESH_SECS: "5"
       ZC_LOGIN_MODE: local
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -c
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/8080;
+          printf 'GET /__zc/healthz HTTP/1.0\r\n\r\n' >&3;
+          read -r status <&3;
+          [[ $$status == *' 200 '* ]]
+      interval: 5s
+      timeout: 3s
+      retries: 12
     ports:
       - "127.0.0.1:80:8080"
     volumes:
@@ -120,6 +142,7 @@ services:
       default:
         aliases:
           - zc-cr.default.svc.cluster.local
+          - p2.test
 
   dns-interceptor:
     build:
@@ -132,7 +155,7 @@ services:
     environment:
       DNS_API_URL: http://api-nodejs:3000
     ports:
-      - "127.0.0.1:5353:5353/udp"
+      - "127.0.0.1:${LOCAL_DNS_PORT:-1053}:5353/udp"
 
   local-smoke:
     <<: *api-image

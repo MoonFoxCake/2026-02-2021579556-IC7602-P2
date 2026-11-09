@@ -56,8 +56,8 @@ async function smoke() {
   assert.ok((await domains.json()).domains.some((d) => d.domain === 'p2.test' && d.verified));
   console.log('PASS: UI, same-origin API proxy, emulator login and seeded domain');
 
-  const headers = { host: 'p2.test', 'content-type': 'application/json' };
-  const base = 'http://zonal-cache:8080';
+  const headers = { 'content-type': 'application/json' };
+  const base = 'http://p2.test:8080';
   const created = await request(`${base}/api/items.json`, {
     method: 'POST', headers, body: JSON.stringify({ probe: randomUUID() }),
   });

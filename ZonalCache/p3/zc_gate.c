@@ -50,6 +50,7 @@ static void redirect(zc_gate_res_t *rs, const char *location) {
     rs->action = ZC_GATE_RESPOND; rs->status = 302;
     add_header(rs, "Location: %s", location);
     add_header(rs, "Cache-Control: no-store");
+    add_header(rs, "Referrer-Policy: no-referrer");
     set_body(rs, "text/plain; charset=utf-8", strdup("Redirigiendo...\n"));
 }
 

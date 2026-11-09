@@ -7,7 +7,7 @@
 # Variables (desde ZonalCache/.env o exportadas antes de correr):
 #   ZC_CONFIG_URL     obligatoria  base del API Node.js (https://<api>.vercel.app)
 #   ZC_CONFIG_TOKEN   obligatoria  = SERVICE_KEY configurada en Vercel
-#   ZC_TICKET_SECRET  si ZC_LOGIN_MODE=ui (>= 16 caracteres; = TICKET_SECRET del API)
+#   ZC_TICKET_SECRET  si ZC_LOGIN_MODE=ui (>= 32 caracteres; = TICKET_SECRET del API)
 #   ZC_LOGIN_MODE     local | ui (default local)      ZC_LOGIN_UI_URL  https://<ui>.vercel.app/cache-login
 #   ZONES             zonas a desplegar (default "cr us"; cada una necesita helm/zonal-cache/values-<zona>.yaml)
 #   NAMESPACE         default            IMAGE  zonal-cache:dev      SERVICE_TYPE  LoadBalancer | NodePort
@@ -22,7 +22,7 @@ ZONES=${ZONES:-"cr us"}; NAMESPACE=${NAMESPACE:-default}; IMAGE=${IMAGE:-zonal-c
 ZC_LOGIN_MODE=${ZC_LOGIN_MODE:-local}; SERVICE_TYPE=${SERVICE_TYPE:-LoadBalancer}; TLS_CN=${TLS_CN:-ejemplo.com}
 REPO=${IMAGE%:*}; TAG=${IMAGE##*:}
 for t in kubectl helm; do command -v $t >/dev/null || { echo "Falta $t en el PATH"; exit 1; }; done
-if [ "$ZC_LOGIN_MODE" = ui ] && [ ${#ZC_TICKET_SECRET} -lt 16 ]; then echo "ZC_LOGIN_MODE=ui requiere ZC_TICKET_SECRET >= 16"; exit 1; fi
+if [ "$ZC_LOGIN_MODE" = ui ] && [ ${#ZC_TICKET_SECRET} -lt 32 ]; then echo "ZC_LOGIN_MODE=ui requiere ZC_TICKET_SECRET >= 32"; exit 1; fi
 
 echo "==> 1/4 Imagen $IMAGE"
 if command -v minikube >/dev/null && minikube status >/dev/null 2>&1; then

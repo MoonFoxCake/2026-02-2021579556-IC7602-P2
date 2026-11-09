@@ -18,7 +18,9 @@ Sin `FIRESTORE_EMULATOR_HOST`, se conserva la inicialización con cuenta de serv
 
 La imagen corre sin root, publica el puerto 3000 y excluye env files y claves de cuenta de servicio del contexto. Compruebe `/api/health` (proceso) y `/api/health/db` (conectividad Firestore).
 
-Variables principales: `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, `JWT_SECRET`, `SERVICE_KEY`, `ZONE_CACHES`, `COUNTRY_ZONES`, `IP_COUNTRY_RANGES` y `CORS_ORIGINS`. Nunca agregue valores secretos a Dockerfile, Compose, Helm values o Git.
+Variables principales: `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, `FIREBASE_DATABASE_URL`, `JWT_SECRET`, `SERVICE_KEY`, `TICKET_SECRET`, `ZONE_CACHES`, `COUNTRY_ZONES` y `CORS_ORIGINS`. Nunca agregue secretos a Dockerfile, Compose, Helm values o Git.
+
+El país se consulta en `/ipToCountry` de Realtime Database con el esquema numérico inclusivo del P1 y un índice `ipFrom`. El importador `npm run ip-country:dbip -- <archivo.csv.gz> <MD5-publicado> --import` valida DB-IP Lite antes de reemplazar la tabla. El login externo usa `POST /api/cache-login`; verifica el usuario bcrypt de una regla `userpass` en Firestore y emite el ticket aceptado por la caché C. Configuración y pruebas: [GEO-LOGIN.md](../docs/GEO-LOGIN.md).
 
 La guía de servicios y despliegue Minikube está en [docs/KUBERNETES.md](../docs/KUBERNETES.md). El contrato del API y los modelos Firestore están en [API.md](API.md).
 

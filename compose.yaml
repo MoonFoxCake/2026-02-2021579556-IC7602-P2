@@ -51,7 +51,6 @@ services:
       CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
       ZONE_CACHES: cr=127.0.0.1,us=127.0.0.1
       COUNTRY_ZONES: CR=cr,US=us,*=cr
-      IP_COUNTRY_RANGES: 0.0.0.0/0=CR
     depends_on:
       local-seed:
         condition: service_completed_successfully
